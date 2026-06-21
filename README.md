@@ -42,7 +42,7 @@ uv run python examples/01_mpc_cartpole.py     # MPPI swing-up, prints SWUNG UP
 ```
 
 For standing up a fresh GPU instance end to end, see
-[docs/cloud-bootstrap.md](docs/cloud-bootstrap.md).
+[bootstrap/cloud-bootstrap.md](bootstrap/cloud-bootstrap.md).
 
 ## Examples
 

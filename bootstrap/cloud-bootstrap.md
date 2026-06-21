@@ -1,12 +1,10 @@
 # Cloud bootstrap — run controlkit on an NVIDIA GPU box
 
-This is a **runbook for Claude running *on* a fresh GPU instance**. Provisioning
-the instance (Lambda API, SSH) is covered in [cloud-setup.md](cloud-setup.md);
-this doc picks up once you're SSH'd in and starts from a clean OS.
+This is a **runbook for Claude running *on* a fresh GPU instance**. This doc picks up once you're SSH'd in and starts from a clean OS.
 
 The MJX examples (`examples/00_minimal.py`, `examples/01_mpc_cartpole.py`) are
 pure JAX physics. They *run* on a Mac but only on CPU and slowly (see
-[gotchas.md](gotchas.md)); the whole reason for the cloud box is to put that same
+[gotchas.md](../docs/gotchas.md)); the whole reason for the cloud box is to put that same
 device-agnostic code on a real CUDA GPU.
 
 **How to read this doc.** The steps below are *first-run* instructions: run them
@@ -21,8 +19,8 @@ meant to re-run on a *similar* instance later (and to seed a future Docker image
 
 | script | runs on | job |
 |---|---|---|
-| [`local_bootstrap.sh`](../local_bootstrap.sh) | your **laptop** | control plane: copy credentials, optionally install Claude on the box, then trigger the box-side setup over SSH |
-| [`bootstrap.sh`](../bootstrap.sh) | the **box** | data plane: all system + app setup, no SSH, no secrets baked in — so it ports straight into a Dockerfile later |
+| [`local_bootstrap.sh`](local_bootstrap.sh) | your **laptop** | control plane: copy credentials, optionally install Claude on the box, then trigger the box-side setup over SSH |
+| [`bootstrap.sh`](bootstrap.sh) | the **box** | data plane: all system + app setup, no SSH, no secrets baked in — so it ports straight into a Dockerfile later |
 
 Keep the heavy lifting in `bootstrap.sh` (box-local, re-runnable, Docker-ready);
 `local_bootstrap.sh` is just the laptop-side wrapper that gets credentials there
@@ -39,17 +37,19 @@ The catch: Claude's **command** tool works over SSH, but its **file** tools
 (Read/Edit/Grep) only see the *local* filesystem. So:
 
 - **Standing the box up + running the examples** → local-Claude over SSH is ideal.
-- **Editing/debugging code *on the box*** → install Claude *on the box* (set
-  `INSTALL_CLAUDE=1` for `local_bootstrap.sh`), where its file tools see the
-  box's filesystem directly. Not needed for setup; nice for later dev.
+- **Editing/debugging code *on the box*** → install Claude *on the box* (pass
+  `CLAUDE_AUTH=login` or `CLAUDE_AUTH=key` to `local_bootstrap.sh`), where its
+  file tools see the box's filesystem directly. Not needed for setup; nice for
+  later dev.
 
-Claude on the box can authenticate two ways (pick one):
-- **Log in (use your subscription)** — install Claude with `INSTALL_CLAUDE=1` and
-  *no* API key, then `ssh "$BOX"` and run `claude`: it prints a URL to open on
-  your laptop and a code to paste back (works over SSH). Easiest if you already
-  have a Pro/Max plan.
-- **API key** — also pass `ANTHROPIC_API_KEY=sk-ant-…`; the wrapper drops it on
-  the box and exports it. Non-interactive, but billed pay-as-you-go.
+Claude on the box has two auth branches (pick one):
+- **`CLAUDE_AUTH=login`** (use your subscription) — installs Claude, then *you*
+  finish login: `ssh "$BOX"` and run `claude`, which prints a URL to open on your
+  laptop and a code to paste back (works over SSH). Easiest if you have a Pro/Max
+  plan.
+- **`CLAUDE_AUTH=key`** — reads your key from `~/.secrets/anthropic.api` on the
+  laptop, copies it to the same path on the box, and exports it. Non-interactive,
+  billed pay-as-you-go.
 
 Note: each `ssh "$BOX" 'cmd'` is a fresh shell (no carried-over cwd/env), so
 chain commands (`cd repo && …`) or run scripts.
@@ -61,20 +61,20 @@ chain commands (`cd repo && …`) or run scripts.
 1. **`gh` is authenticated** (`gh auth status` is green). This is the source of
    the GitHub credential — we never type a token by hand.
 2. **You can SSH into the instance** (key set up per
-   [cloud-setup.md](cloud-setup.md)). Call its address `$BOX`, e.g.
+   [cloud-setup.md](../docs/cloud-setup.md)). Call its address `$BOX`, e.g.
    `ubuntu@203.0.113.10`.
-3. *(only if you want Claude on the box with **API-key** auth)* an
-   **`ANTHROPIC_API_KEY`** in your laptop env. Get one at the Anthropic Console
+3. *(only for `CLAUDE_AUTH=key`)* your Anthropic key saved at
+   **`~/.secrets/anthropic.api`** on the laptop. Get one at the Anthropic Console
    (`console.anthropic.com` → Settings → API keys); billed pay-as-you-go,
-   separate from a Pro/Max subscription. Skip this if you'd rather **log in** on
-   the box with your subscription.
+   separate from a Pro/Max subscription. Skip this if you'd rather use
+   `CLAUDE_AUTH=login`.
 
 The easy path is to let the wrapper do the laptop side:
 
 ```bash
-./local_bootstrap.sh "$BOX"                                  # bootstrap only, no Claude on the box
-INSTALL_CLAUDE=1 ./local_bootstrap.sh "$BOX"                 # + Claude; log in on the box (subscription)
-INSTALL_CLAUDE=1 ANTHROPIC_API_KEY=sk-ant-... ./local_bootstrap.sh "$BOX"   # + Claude with API-key auth
+./local_bootstrap.sh "$BOX"                         # bootstrap only, no Claude on the box
+CLAUDE_AUTH=login ./local_bootstrap.sh "$BOX"       # + Claude, you log in on the box (subscription)
+CLAUDE_AUTH=key   ./local_bootstrap.sh "$BOX"       # + Claude, key from ~/.secrets/anthropic.api
 ```
 
 Under the hood that copies your git credential to the box (and runs
@@ -88,11 +88,11 @@ gh auth token | ssh "$BOX" 'umask 077; cat > ~/.gh_token'
 `clone`/`pull`/`commit`/`push` work for the life of the instance. The token never
 appears in this repo, in either script, or in chat.
 
-> Security: `~/.gh_token`, `~/.git-credentials`, and `~/.anthropic_key` hold
-> secrets in plaintext on the box. The gh token carries your gh scopes (typically
-> full repo read/write) and the API key bills your account, so treat the instance
-> as trusted; revoke (gh / Console) if it's ever exposed. Fine for a personal dev
-> box; revisit before sharing one.
+> Security: `~/.gh_token`, `~/.git-credentials`, and (for `CLAUDE_AUTH=key`)
+> `~/.secrets/anthropic.api` hold secrets in plaintext on the box. The gh token
+> carries your gh scopes (typically full repo read/write) and the API key bills
+> your account, so treat the instance as trusted; revoke (gh / Console) if it's
+> ever exposed. Fine for a personal dev box; revisit before sharing one.
 
 ---
 
@@ -334,7 +334,7 @@ uv run python examples/01_mpc_cartpole.py
 - **Persistent storage / GH for next time:** if the instance has an attached
   volume, clone the repo and point the uv cache there (`export
   UV_CACHE_DIR=/<volume>/uv-cache`) so a re-launched box warm-starts. (Tracked in
-  [todos.md](todos.md).)
+  [todos.md](../docs/todos.md).)
 
 ---
 
@@ -363,7 +363,7 @@ laptop handoff (`gh auth token | ssh "$BOX" '… > ~/.gh_token'`) followed by
 - **jax/jaxlib version skew.** Pin the cuda extra to the *installed* jax version
   (step 5), not "latest".
 - **`--render` does nothing useful headless.** Viewer needs a display; it's a
-  local-machine thing. See [gotchas.md](gotchas.md).
+  local-machine thing. See [gotchas.md](../docs/gotchas.md).
 - **`Failed to import warp` on every run.** Harmless; from a hard-coded `print`
   in MJX. Install `warp-lang` to remove, or ignore.
 - **RK4 integrator.** `models/cartpole.xml` uses `integrator="RK4"`. The old
@@ -380,39 +380,41 @@ laptop handoff (`gh auth token | ssh "$BOX" '… > ~/.gh_token'`) followed by
 
 - **PyTorch GPU / RL.** No RL example exists in the tree now. SB3 pulls CPU
   torch; leave it.
-- **ROS2, full viz pipeline.** Future wants in [todos.md](todos.md), not needed
+- **ROS2, full viz pipeline.** Future wants in [todos.md](../docs/todos.md), not needed
   to run these examples.
 
 ---
 
 ## The scripts
 
-The recipe lives in two real files at the repo root, not inline here (so they
-don't drift):
+The recipe lives in two real files next to this doc in `bootstrap/`, not inline
+here (so they don't drift). Both carry a documented header (purpose, prereqs,
+usage, assumptions) and per-step comments — read the top of each before running.
 
-- **[`bootstrap.sh`](../bootstrap.sh)** — the box-side setup, mapping 1:1 to
+- **[`bootstrap.sh`](bootstrap.sh)** — the box-side setup, mapping 1:1 to
   steps 0–7 above. It's **v0**: the steps above are written so you *verify it
   against a real box on the first run and correct it in place*. Config (git
   identity, `REPO_URL`, workdir) is at the top; no secrets.
-- **[`local_bootstrap.sh`](../local_bootstrap.sh)** — the laptop-side wrapper:
-  checks prereqs, copies the gh token (and optionally installs + keys Claude with
-  `INSTALL_CLAUDE=1`), then runs `bootstrap.sh` on the box over SSH.
+- **[`local_bootstrap.sh`](local_bootstrap.sh)** — the laptop-side wrapper:
+  checks prereqs, copies the gh token, optionally installs Claude on the box via
+  `CLAUDE_AUTH=login` or `CLAUDE_AUTH=key` (see above), then runs `bootstrap.sh`
+  on the box over SSH.
 
-First run, by hand or via local-Claude over SSH:
+First run, from the repo root, by hand or via local-Claude over SSH:
 
 ```bash
-./local_bootstrap.sh "$BOX"          # uses bootstrap.sh under the hood
+./bootstrap/local_bootstrap.sh "$BOX"        # uses bootstrap/bootstrap.sh under the hood
 ```
 
 Re-run on the box later (it carries its own copy after the clone):
 
 ```bash
-ssh "$BOX" 'cd control-kit && bash bootstrap.sh'
+ssh "$BOX" 'cd control-kit && bash bootstrap/bootstrap.sh'
 ```
 
-> Note: `bootstrap.sh` clones `REPO_URL`, so the repo must exist on GitHub first.
-> This repo currently has no remote — create it and `git push`, then set
-> `REPO_URL` (and the `<owner>`) before the box-side clone will work.
+> `bootstrap.sh` clones `REPO_URL`, which defaults to
+> `https://github.com/mirkoklukas/control-kit.git` (private). Override `REPO_URL`
+> for a fork or a different repo.
 
 ---
 
