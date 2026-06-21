@@ -1,0 +1,16 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+runs/
+*.zip
+.DS_Store
+
+# machine-local / personal
+.claude/settings.local.json
+.obsidian/workspace.json
+
+# secrets (in case scripts are ever run from inside the repo dir)
+.gh_token
+.anthropic_key
+.git-credentials

@@ -1,0 +1,178 @@
+<mujoco model="hexapod">
+  <compiler angle="degree" autolimits="true"/>
+  <option timestep="0.004" integrator="implicitfast"/>
+
+  <!-- Radial hexapod: a hexagonal trunk with one leg at each of the 6 corners.
+       Corners sit at angles 30, 90, 150, 210, 270, 330 deg (circumradius 0.12), so each
+       leg points straight out along its corner's bearing. Per leg: coxa (yaw) -> femur
+       (lift) -> tibia (knee), 18 actuated DOF. Leg-local frame: +x outward, +z up; the
+       leg body is rotated about z by its corner angle and the same recipe is reused.
+       At all-zero joint angles the legs splay out and down into a standing pose. -->
+  <default>
+    <geom density="600" friction="1.0 0.5 0.5"/>
+    <default class="hexapod">
+      <joint type="hinge" armature="0.008" damping="0.4" frictionloss="0.02"/>
+      <geom type="capsule" size="0.012" rgba="0.55 0.58 0.62 1"/>
+      <position kp="25" kv="2.5" forcerange="-15 15"/>
+      <default class="coxa">
+        <joint axis="0 0 1" range="-45 45"/>
+      </default>
+      <default class="femur">
+        <joint axis="0 1 0" range="-75 75"/>
+      </default>
+      <default class="tibia">
+        <joint axis="0 1 0" range="-110 30"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2"
+             width="512" height="512"/>
+    <material name="grid" texture="grid" texrepeat="10 10" reflectance="0.2"/>
+    <!-- Hexagonal prism: 6 top + 6 bottom corners at circumradius 0.12, half-thickness 0.025.
+         MuJoCo takes the convex hull, giving a clean hexagon body. -->
+    <mesh name="hexbody" vertex="
+       0.10392  0.06   0.025
+       0.0      0.12   0.025
+      -0.10392  0.06   0.025
+      -0.10392 -0.06   0.025
+       0.0     -0.12   0.025
+       0.10392 -0.06   0.025
+       0.10392  0.06  -0.025
+       0.0      0.12  -0.025
+      -0.10392  0.06  -0.025
+      -0.10392 -0.06  -0.025
+       0.0     -0.12  -0.025
+       0.10392 -0.06  -0.025"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 2.0" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
+
+    <body name="trunk" pos="0 0 0.20">
+      <freejoint name="root"/>
+      <geom name="trunk" type="mesh" mesh="hexbody" rgba="0.85 0.5 0.2 1"/>
+
+      <!-- corner @ 30 deg : front-left -->
+      <body name="coxa_FL" pos="0.10392 0.06 0" euler="0 0 30" childclass="hexapod">
+        <joint name="coxa_FL" class="coxa"/>
+        <geom fromto="0 0 0 0.06 0 0"/>
+        <body name="femur_FL" pos="0.06 0 0">
+          <joint name="femur_FL" class="femur"/>
+          <geom fromto="0 0 0 0.10 0 0"/>
+          <body name="tibia_FL" pos="0.10 0 0">
+            <joint name="tibia_FL" class="tibia"/>
+            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom name="foot_FL" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
+            <site name="foot_FL" pos="0.05 0 -0.19" size="0.012"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- corner @ 90 deg : mid-left -->
+      <body name="coxa_ML" pos="0.0 0.12 0" euler="0 0 90" childclass="hexapod">
+        <joint name="coxa_ML" class="coxa"/>
+        <geom fromto="0 0 0 0.06 0 0"/>
+        <body name="femur_ML" pos="0.06 0 0">
+          <joint name="femur_ML" class="femur"/>
+          <geom fromto="0 0 0 0.10 0 0"/>
+          <body name="tibia_ML" pos="0.10 0 0">
+            <joint name="tibia_ML" class="tibia"/>
+            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom name="foot_ML" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
+            <site name="foot_ML" pos="0.05 0 -0.19" size="0.012"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- corner @ 150 deg : back-left -->
+      <body name="coxa_BL" pos="-0.10392 0.06 0" euler="0 0 150" childclass="hexapod">
+        <joint name="coxa_BL" class="coxa"/>
+        <geom fromto="0 0 0 0.06 0 0"/>
+        <body name="femur_BL" pos="0.06 0 0">
+          <joint name="femur_BL" class="femur"/>
+          <geom fromto="0 0 0 0.10 0 0"/>
+          <body name="tibia_BL" pos="0.10 0 0">
+            <joint name="tibia_BL" class="tibia"/>
+            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom name="foot_BL" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
+            <site name="foot_BL" pos="0.05 0 -0.19" size="0.012"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- corner @ 210 deg : back-right -->
+      <body name="coxa_BR" pos="-0.10392 -0.06 0" euler="0 0 210" childclass="hexapod">
+        <joint name="coxa_BR" class="coxa"/>
+        <geom fromto="0 0 0 0.06 0 0"/>
+        <body name="femur_BR" pos="0.06 0 0">
+          <joint name="femur_BR" class="femur"/>
+          <geom fromto="0 0 0 0.10 0 0"/>
+          <body name="tibia_BR" pos="0.10 0 0">
+            <joint name="tibia_BR" class="tibia"/>
+            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom name="foot_BR" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
+            <site name="foot_BR" pos="0.05 0 -0.19" size="0.012"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- corner @ 270 deg : mid-right -->
+      <body name="coxa_MR" pos="0.0 -0.12 0" euler="0 0 270" childclass="hexapod">
+        <joint name="coxa_MR" class="coxa"/>
+        <geom fromto="0 0 0 0.06 0 0"/>
+        <body name="femur_MR" pos="0.06 0 0">
+          <joint name="femur_MR" class="femur"/>
+          <geom fromto="0 0 0 0.10 0 0"/>
+          <body name="tibia_MR" pos="0.10 0 0">
+            <joint name="tibia_MR" class="tibia"/>
+            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom name="foot_MR" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
+            <site name="foot_MR" pos="0.05 0 -0.19" size="0.012"/>
+          </body>
+        </body>
+      </body>
+
+      <!-- corner @ 330 deg : front-right -->
+      <body name="coxa_FR" pos="0.10392 -0.06 0" euler="0 0 330" childclass="hexapod">
+        <joint name="coxa_FR" class="coxa"/>
+        <geom fromto="0 0 0 0.06 0 0"/>
+        <body name="femur_FR" pos="0.06 0 0">
+          <joint name="femur_FR" class="femur"/>
+          <geom fromto="0 0 0 0.10 0 0"/>
+          <body name="tibia_FR" pos="0.10 0 0">
+            <joint name="tibia_FR" class="tibia"/>
+            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom name="foot_FR" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
+            <site name="foot_FR" pos="0.05 0 -0.19" size="0.012"/>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <!-- 18 position servos, targets default to 0 -> holds the splayed standing pose. -->
+  <actuator>
+    <position name="coxa_FL"  joint="coxa_FL"  class="hexapod"/>
+    <position name="femur_FL" joint="femur_FL" class="hexapod"/>
+    <position name="tibia_FL" joint="tibia_FL" class="hexapod"/>
+    <position name="coxa_ML"  joint="coxa_ML"  class="hexapod"/>
+    <position name="femur_ML" joint="femur_ML" class="hexapod"/>
+    <position name="tibia_ML" joint="tibia_ML" class="hexapod"/>
+    <position name="coxa_BL"  joint="coxa_BL"  class="hexapod"/>
+    <position name="femur_BL" joint="femur_BL" class="hexapod"/>
+    <position name="tibia_BL" joint="tibia_BL" class="hexapod"/>
+    <position name="coxa_BR"  joint="coxa_BR"  class="hexapod"/>
+    <position name="femur_BR" joint="femur_BR" class="hexapod"/>
+    <position name="tibia_BR" joint="tibia_BR" class="hexapod"/>
+    <position name="coxa_MR"  joint="coxa_MR"  class="hexapod"/>
+    <position name="femur_MR" joint="femur_MR" class="hexapod"/>
+    <position name="tibia_MR" joint="tibia_MR" class="hexapod"/>
+    <position name="coxa_FR"  joint="coxa_FR"  class="hexapod"/>
+    <position name="femur_FR" joint="femur_FR" class="hexapod"/>
+    <position name="tibia_FR" joint="tibia_FR" class="hexapod"/>
+  </actuator>
+</mujoco>

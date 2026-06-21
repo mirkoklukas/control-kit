@@ -1,0 +1,386 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>MJCF viewer</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; background: #11151c; color: #d7dde6; }
+  #app { display: flex; height: 100%; }
+  #view { flex: 1; position: relative; }
+  #view canvas { display: block; }
+  #drop { position: absolute; inset: 0; display: none; place-items: center;
+    background: rgba(10,14,20,.85); font-size: 16px; color: #9fb0c3; pointer-events: none; }
+  #drop.show { display: grid; }
+  #panel { width: 290px; flex: none; background: #161b24; border-left: 1px solid #232b38;
+    display: flex; flex-direction: column; }
+  #panel header { padding: 12px 14px; border-bottom: 1px solid #232b38; }
+  #panel header h1 { margin: 0; font-size: 14px; font-weight: 600; }
+  #panel header .sub { color: #7e8aa0; font-size: 11px; margin-top: 3px; }
+  .bar { padding: 10px 14px; border-bottom: 1px solid #232b38; display: flex; flex-wrap: wrap; gap: 6px; }
+  button, label.file { background: #232c3b; border: 1px solid #2f3a4d; color: #cdd6e3;
+    border-radius: 6px; padding: 5px 9px; font-size: 12px; cursor: pointer; }
+  button:hover, label.file:hover { background: #2c3950; }
+  label.file input { display: none; }
+  .check { display: flex; align-items: center; gap: 5px; cursor: pointer; user-select: none; }
+  #joints { overflow-y: auto; flex: 1; padding: 8px 14px 24px; }
+  .jt { margin: 9px 0; }
+  .jt .row { display: flex; justify-content: space-between; font-size: 11px; color: #9fb0c3; }
+  .jt .row b { color: #d7dde6; font-weight: 600; }
+  .jt input[type=range] { width: 100%; margin: 3px 0 0; accent-color: #5b9bd5; }
+  .empty { color: #6f7c92; padding: 6px 0; }
+  #err { color: #ff8a8a; padding: 6px 14px; font-size: 12px; white-space: pre-wrap; }
+</style>
+
+<div id="app">
+  <div id="view"><div id="drop">drop a MuJoCo .xml here</div></div>
+  <div id="panel">
+    <header>
+      <h1 id="title">MJCF viewer</h1>
+      <div class="sub" id="info">no model loaded</div>
+    </header>
+    <div class="bar">
+      <label class="file">load .xml<input id="file" type="file" accept=".xml"></label>
+      <button id="reset">reset pose</button>
+      <button id="recenter">recenter</button>
+    </div>
+    <div class="bar">
+      <label class="check"><input id="cSites" type="checkbox"> sites</label>
+      <label class="check"><input id="cWire" type="checkbox"> wireframe</label>
+      <label class="check"><input id="cGrid" type="checkbox" checked> grid</label>
+    </div>
+    <div id="err"></div>
+    <div id="joints"><div class="empty">Joint sliders appear here.</div></div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
+
+// ---------- three.js scene (MuJoCo is Z-up) ----------
+const viewEl = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+viewEl.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x11151c);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+camera.up.set(0, 0, 1);
+camera.position.set(0.7, -0.9, 0.55);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0.15);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x2a2f3a, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(1.2, -0.8, 2.0);
+scene.add(sun);
+
+const grid = new THREE.GridHelper(6, 60, 0x3a4a63, 0x222b39);
+grid.rotation.x = Math.PI / 2;          // GridHelper is XZ by default -> put it in XY
+scene.add(grid);
+
+let root = new THREE.Group();           // current model root
+scene.add(root);
+
+function resize() {
+  const w = viewEl.clientWidth, h = viewEl.clientHeight;
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(w, h, false);
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+
+(function loop() {
+  requestAnimationFrame(loop);
+  controls.update();
+  renderer.render(scene, camera);
+})();
+
+// ---------- small helpers ----------
+const DEG = Math.PI / 180;
+const nums = s => (s || '').trim().split(/\s+/).filter(Boolean).map(Number);
+const attrs = el => { const o = {}; for (const a of el.attributes) o[a.name] = a.value; return o; };
+
+// MuJoCo orientation -> THREE.Quaternion (supports quat, euler, axisangle).
+function orientQuat(a, angleToRad) {
+  if (a.quat) { const [w, x, y, z] = nums(a.quat); return new THREE.Quaternion(x, y, z, w).normalize(); }
+  if (a.axisangle) { const [x, y, z, ang] = nums(a.axisangle);
+    return new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(x, y, z).normalize(), ang * angleToRad); }
+  if (a.euler) { const [ax, ay, az] = nums(a.euler).map(v => v * angleToRad);
+    const q = new THREE.Quaternion();
+    q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), ax));
+    q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), ay));
+    q.multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 0, 1), az));
+    return q; }
+  return new THREE.Quaternion();
+}
+function applyLocal(obj, a, angleToRad) {
+  const [px, py, pz] = a.pos ? nums(a.pos) : [0, 0, 0];
+  obj.position.set(px || 0, py || 0, pz || 0);
+  obj.quaternion.copy(orientQuat(a, angleToRad));
+}
+
+// ---------- MJCF parsing ----------
+const state = { sites: [], joints: [], materials: [], angleToRad: DEG };
+
+function parseDefaults(mujocoEl) {
+  // Build map: className(or '' for main) -> { tag -> {attr:val} }, with inheritance.
+  const byClass = new Map();
+  function walk(defEl, parentResolved) {
+    const cls = defEl.getAttribute('class') || '';
+    const resolved = {};
+    for (const tag in parentResolved) resolved[tag] = { ...parentResolved[tag] };
+    for (const child of defEl.children) {
+      if (child.tagName === 'default') continue;
+      resolved[child.tagName] = { ...(resolved[child.tagName] || {}), ...attrs(child) };
+    }
+    byClass.set(cls, resolved);
+    for (const child of defEl.children)
+      if (child.tagName === 'default') walk(child, resolved);
+  }
+  for (const d of mujocoEl.children) if (d.tagName === 'default') walk(d, {});
+  if (!byClass.has('')) byClass.set('', {});
+  return byClass;
+}
+
+function meshAssets(mujocoEl) {
+  const map = new Map();
+  const asset = mujocoEl.querySelector('asset');
+  if (!asset) return map;
+  for (const m of asset.querySelectorAll('mesh')) {
+    const name = m.getAttribute('name');
+    if (m.getAttribute('vertex')) {
+      const v = nums(m.getAttribute('vertex'));
+      const pts = [];
+      for (let i = 0; i + 2 < v.length; i += 3) pts.push(new THREE.Vector3(v[i], v[i + 1], v[i + 2]));
+      map.set(name, pts);
+    } else map.set(name, null);   // file-based mesh: unsupported, skip
+  }
+  return map;
+}
+
+function makeMaterial(rgba) {
+  const c = rgba ? nums(rgba) : [0.7, 0.7, 0.75, 1];
+  const mat = new THREE.MeshStandardMaterial({
+    color: new THREE.Color(c[0], c[1], c[2]),
+    metalness: 0.1, roughness: 0.7,
+    transparent: (c[3] ?? 1) < 1, opacity: c[3] ?? 1,
+  });
+  state.materials.push(mat);
+  return mat;
+}
+
+// Build a single geom -> Object3D already carrying its local transform.
+function buildGeom(m, meshes) {
+  const type = m.type || 'sphere';
+  const size = nums(m.size);
+  const mat = makeMaterial(m.rgba);
+
+  // capsule / cylinder via fromto: geometry runs along +Y, then aim Y at (p2-p1).
+  if ((type === 'capsule' || type === 'cylinder') && m.fromto) {
+    const f = nums(m.fromto);
+    const p1 = new THREE.Vector3(f[0], f[1], f[2]), p2 = new THREE.Vector3(f[3], f[4], f[5]);
+    const dir = new THREE.Vector3().subVectors(p2, p1), len = dir.length();
+    const r = size[0] || 0.01;
+    const geo = type === 'capsule'
+      ? new THREE.CapsuleGeometry(r, len, 8, 16)
+      : new THREE.CylinderGeometry(r, r, len, 20);
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+    mesh.position.copy(p1).addScaledVector(dir, 0.5);
+    return mesh;
+  }
+
+  let geo;
+  if (type === 'box') geo = new THREE.BoxGeometry(2 * size[0], 2 * size[1], 2 * size[2]);
+  else if (type === 'sphere') geo = new THREE.SphereGeometry(size[0] || 0.01, 24, 16);
+  else if (type === 'ellipsoid') geo = new THREE.SphereGeometry(1, 24, 16);
+  else if (type === 'capsule') geo = new THREE.CapsuleGeometry(size[0], 2 * (size[1] || 0), 8, 16);
+  else if (type === 'cylinder') geo = new THREE.CylinderGeometry(size[0], size[0], 2 * (size[1] || 0), 20);
+  else if (type === 'mesh') {
+    const pts = meshes.get(m.mesh);
+    if (!pts) return null;
+    geo = new ConvexGeometry(pts);
+  } else geo = new THREE.SphereGeometry(size[0] || 0.01, 16, 12);
+
+  const mesh = new THREE.Mesh(geo, mat);
+  applyLocal(mesh, m, state.angleToRad);
+  // capsule/cylinder primitives default to local +Z in MuJoCo, +Y in three: pre-rotate.
+  if (type === 'capsule' || type === 'cylinder')
+    mesh.geometry.rotateX(Math.PI / 2);
+  if (type === 'ellipsoid') mesh.scale.set(size[0], size[1], size[2]);
+  return mesh;
+}
+
+// Resolve an element's attributes against its default class + inherited childclass.
+function resolved(byClass, el, childcls) {
+  const cls = el.getAttribute('class') || childcls || '';
+  const base = (byClass.get(cls) || {})[el.tagName] || {};
+  return { ...base, ...attrs(el) };
+}
+
+function buildBody(byClass, meshes, bodyEl, childcls) {
+  const g = new THREE.Group();
+  applyLocal(g, attrs(bodyEl), state.angleToRad);
+  const cc = bodyEl.getAttribute('childclass') || childcls || '';
+
+  let attach = g;   // deepest joint group; body content moves with its joints
+  for (const ch of bodyEl.children) {
+    if (ch.tagName === 'joint') {
+      const j = resolved(byClass, ch, cc);
+      const jtype = j.type || 'hinge';
+      if (jtype === 'free') continue;
+      const jg = new THREE.Group(); attach.add(jg); attach = jg;
+      const axis = nums(j.axis || '0 0 1');
+      const range = nums(j.range);
+      state.joints.push({
+        name: j.name || ch.getAttribute('name') || ('joint' + state.joints.length),
+        type: jtype, group: jg,
+        axis: new THREE.Vector3(axis[0], axis[1], axis[2]).normalize(),
+        min: range[0] ?? (jtype === 'slide' ? -1 : -180),
+        max: range[1] ?? (jtype === 'slide' ? 1 : 180),
+        unit: jtype === 'slide' ? 'm' : 'deg',
+      });
+    } else if (ch.tagName === 'freejoint') { /* fixed base for viewing */ }
+  }
+
+  for (const ch of bodyEl.children) {
+    if (ch.tagName === 'geom') {
+      const mesh = buildGeom(resolved(byClass, ch, cc), meshes);
+      if (mesh) attach.add(mesh);
+    } else if (ch.tagName === 'site') {
+      const s = resolved(byClass, ch, cc);
+      const sm = new THREE.Mesh(
+        new THREE.SphereGeometry((nums(s.size)[0] || 0.01), 12, 8),
+        new THREE.MeshBasicMaterial({ color: 0xffd23f }));
+      applyLocal(sm, s, state.angleToRad);
+      sm.visible = false; state.sites.push(sm); attach.add(sm);
+    } else if (ch.tagName === 'body') {
+      attach.add(buildBody(byClass, meshes, ch, cc));
+    }
+  }
+  return g;
+}
+
+function loadModel(xmlText, label) {
+  document.getElementById('err').textContent = '';
+  let doc;
+  try {
+    doc = new DOMParser().parseFromString(xmlText, 'application/xml');
+    if (doc.querySelector('parsererror')) throw new Error(doc.querySelector('parsererror').textContent);
+  } catch (e) { return fail('XML parse error:\n' + e.message); }
+
+  const mj = doc.querySelector('mujoco');
+  if (!mj) return fail('No <mujoco> root element found.');
+
+  // reset
+  scene.remove(root); root = new THREE.Group(); scene.add(root);
+  state.sites = []; state.joints = []; state.materials = [];
+  const comp = mj.querySelector('compiler');
+  state.angleToRad = (comp && comp.getAttribute('angle') === 'radian') ? 1 : DEG;
+
+  const byClass = parseDefaults(mj);
+  const meshes = meshAssets(mj);
+  const world = mj.querySelector('worldbody');
+  if (!world) return fail('No <worldbody> found.');
+
+  let nbody = 0, ngeom = 0;
+  for (const ch of world.children) {
+    if (ch.tagName === 'geom') {
+      const m = resolved(byClass, ch, '');
+      if ((m.type || '') === 'plane') continue;   // floor handled by the grid
+      const mesh = buildGeom(m, meshes); if (mesh) { root.add(mesh); ngeom++; }
+    } else if (ch.tagName === 'body') {
+      root.add(buildBody(byClass, meshes, ch, '')); nbody++;
+    }
+  }
+  ngeom += state.materials.length; // rough; updated below
+  syncToggles();
+  buildJointUI();
+  document.getElementById('title').textContent = mj.getAttribute('model') || label || 'model';
+  document.getElementById('info').textContent =
+    `${state.joints.length} joints · ${state.materials.length} geoms · ${label || ''}`;
+  frameModel();
+}
+
+function fail(msg) { document.getElementById('err').textContent = msg; }
+
+// ---------- joint UI ----------
+function applyJoint(j, val) {
+  if (j.type === 'slide') j.group.position.copy(j.axis.clone().multiplyScalar(val));
+  else j.group.quaternion.setFromAxisAngle(j.axis, val * (j.unit === 'deg' ? DEG : 1));
+}
+function buildJointUI() {
+  const box = document.getElementById('joints');
+  box.innerHTML = '';
+  if (!state.joints.length) { box.innerHTML = '<div class="empty">No actuated joints.</div>'; return; }
+  for (const j of state.joints) {
+    const wrap = document.createElement('div'); wrap.className = 'jt';
+    const row = document.createElement('div'); row.className = 'row';
+    const out = document.createElement('span');
+    out.textContent = `0 ${j.unit}`;
+    row.innerHTML = `<b>${j.name}</b>`; row.appendChild(out);
+    const sl = document.createElement('input');
+    sl.type = 'range'; sl.min = j.min; sl.max = j.max; sl.step = (j.max - j.min) / 200; sl.value = 0;
+    sl.oninput = () => { applyJoint(j, +sl.value); out.textContent = `${(+sl.value).toFixed(j.unit === 'm' ? 3 : 1)} ${j.unit}`; };
+    j._slider = sl; j._out = out;
+    wrap.appendChild(row); wrap.appendChild(sl); box.appendChild(wrap);
+  }
+}
+
+// ---------- toggles / framing ----------
+function syncToggles() {
+  const wire = document.getElementById('cWire').checked;
+  for (const m of state.materials) m.wireframe = wire;
+  const showSites = document.getElementById('cSites').checked;
+  for (const s of state.sites) s.visible = showSites;
+  grid.visible = document.getElementById('cGrid').checked;
+}
+function frameModel() {
+  const box = new THREE.Box3().setFromObject(root);
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3());
+  const r = box.getSize(new THREE.Vector3()).length() * 0.6 || 0.5;
+  controls.target.copy(c);
+  camera.position.set(c.x + r, c.y - r * 1.3, c.z + r * 0.8);
+  controls.update();
+}
+
+// ---------- inputs ----------
+document.getElementById('file').onchange = e => {
+  const f = e.target.files[0]; if (!f) return;
+  f.text().then(t => loadModel(t, f.name));
+};
+document.getElementById('reset').onclick = () =>
+  state.joints.forEach(j => { if (j._slider) { j._slider.value = 0; applyJoint(j, 0); j._out.textContent = `0 ${j.unit}`; } });
+document.getElementById('recenter').onclick = frameModel;
+for (const id of ['cSites', 'cWire', 'cGrid']) document.getElementById(id).onchange = syncToggles;
+
+const dropEl = document.getElementById('drop');
+addEventListener('dragover', e => { e.preventDefault(); dropEl.classList.add('show'); });
+addEventListener('dragleave', e => { if (e.relatedTarget === null) dropEl.classList.remove('show'); });
+addEventListener('drop', e => {
+  e.preventDefault(); dropEl.classList.remove('show');
+  const f = e.dataTransfer.files[0]; if (f) f.text().then(t => loadModel(t, f.name));
+});
+
+// ---------- autoload (works when served over http) ----------
+const modelParam = new URLSearchParams(location.search).get('model') || '../../models/hexapod.xml';
+fetch(modelParam)
+  .then(r => { if (!r.ok) throw new Error(r.status); return r.text(); })
+  .then(t => loadModel(t, modelParam.split('/').pop()))
+  .catch(() => { document.getElementById('info').textContent = 'drop a .xml or use “load .xml”'; });
+</script>

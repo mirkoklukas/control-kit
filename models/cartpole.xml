@@ -1,0 +1,29 @@
+<mujoco model="cartpole">
+  <option timestep="0.01" integrator="RK4"/>
+
+  <default>
+    <joint damping="0.05"/>
+    <geom rgba="0.7 0.7 0.7 1"/>
+  </default>
+
+  <worldbody>
+    <light pos="0 0 3" dir="0 0 -1"/>
+    <geom name="floor" type="plane" size="4 4 0.1" rgba="0.3 0.3 0.3 1"/>
+    <geom name="rail" type="capsule" fromto="-2 0 1 2 0 1" size="0.02" rgba="0.4 0.4 0.4 1"
+          contype="0" conaffinity="0"/>
+
+    <body name="cart" pos="0 0 1.">
+      <joint name="slider" type="slide" axis="1 0 0" limited="true" range="-1.8 1.8"/>
+      <geom name="cart" type="box" size="0.12 0.08 0.06" mass="1.0" rgba="0.2 0.4 0.8 1"/>
+      <body name="pole" pos="0 0 0">
+        <joint name="hinge" type="hinge" axis="0 1 0"/>
+        <geom name="pole" type="capsule" fromto="0 0 0 0 0 0.6" size="0.03" mass="0.1" rgba="0.8 0.3 0.2 1"/>
+        <site name="tip" pos="0 0 0.6" size="0.04" rgba="1 1 0 1"/>   <!-- massless marker at the pole's free end -->
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <motor name="slide" joint="slider" gear="1" ctrlrange="-20 20"/>
+  </actuator>
+</mujoco>
