@@ -9,9 +9,12 @@ device-agnostic code on a real CUDA GPU.
 
 **How to read this doc.** The steps below are *first-run* instructions: run them
 interactively on a real instance, **verify each assumption against what's
-actually installed**, and adapt where reality differs. As you go you distil the
-commands that worked into `bootstrap.sh`. That script is the frozen recipe,
-meant to re-run on a *similar* instance later (and to seed a future Docker image).
+actually installed**, and adapt where reality differs. As you go you distil what
+worked into the **two scripts** — box-side setup into `bootstrap.sh`, and any
+laptop-side provisioning (requiring/copying local files, secrets, keys) into
+`local_bootstrap.sh`. **Edit either as needed** — both are part of the recipe.
+Together they are the frozen result, meant to re-run on a *similar* instance later
+(and to seed a future Docker image).
 
 ---
 
@@ -116,9 +119,10 @@ the next person can do it in one shot.
 **Deliverables**
 1. A working `.venv` where `jax.devices()` shows a `CudaDevice`, and both
    examples run to completion.
-2. **`bootstrap/bootstrap.sh`**: every command that actually worked, in order,
-   idempotent enough to re-run. A v0 already exists — *correct it to match
-   reality* as you go.
+2. **Both scripts in `bootstrap/`**, corrected to match reality (v0s exist).
+   Box-side commands go in `bootstrap.sh`; anything the laptop must do or hand
+   over (require a local file, copy a secret/key to the box) goes in
+   `local_bootstrap.sh`. Keep `bootstrap.sh` free of secrets and personal identity.
 3. A short **Recipe / changelog** section appended to the bottom of this doc:
    what the environment turned out to be, and every deviation from the steps
    below (driver versions, packages you had to add, errors and their fixes).
@@ -131,6 +135,10 @@ the next person can do it in one shot.
   *failure* goes in the changelog.
 - Prefer non-interactive, re-runnable commands (guard clones/installs with
   existence checks). Don't bake secrets (tokens, keys) into the script.
+- **Both scripts are yours to edit.** If the box needs something that lives on the
+  laptop (a secret, an API key, an SSH/config file), make `local_bootstrap.sh`
+  *require it locally and copy it over* — never put it in `bootstrap.sh`, which
+  must stay secret-free and identity-free so it ports to Docker.
 - If something here is wrong for this box, trust the box and update the doc.
 
 ---
@@ -397,7 +405,11 @@ usage, assumptions) and per-step comments — read the top of each before runnin
 - **[`local_bootstrap.sh`](local_bootstrap.sh)** — the laptop-side wrapper:
   checks prereqs, provisions the box's git (credentials + identity), optionally
   installs Claude (`CLAUDE_AUTH=login` or `CLAUDE_AUTH=key`), and copies
-  `bootstrap.sh` to `~/bootstrap.sh`. It does **not** run it.
+  `bootstrap.sh` to `~/bootstrap.sh`. It does **not** run it. This is also where
+  laptop-side requirements live: to give the box another local file (say
+  `~/.secrets/some.api`), extend this script to *require it locally and copy it
+  over* — that's the same pattern already used for the gh token and the Anthropic
+  key.
 
 Phase 1, from the repo root (by hand or via local-Claude over SSH):
 
