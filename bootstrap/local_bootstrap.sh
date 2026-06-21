@@ -1,49 +1,66 @@
 #!/usr/bin/env bash
 #
-# local_bootstrap.sh — LAPTOP side of the controlkit cloud bootstrap ("control plane").
+# local_bootstrap.sh — LAPTOP side of the controlkit cloud bootstrap.
 #
-# What it does, in order:
-#   1. check laptop prerequisites (gh authenticated, box reachable over SSH)
-#   2. copy your GitHub credential to the box (minted from local gh, never typed)
-#   3. optionally install Claude on the box, via one of two auth branches
-#   4. run the box-side bootstrap.sh over SSH
+# Provisions a fresh GPU instance so that bootstrap.sh can run there with no
+# further input, then copies bootstrap.sh over. It does NOT run bootstrap.sh —
+# you ssh in and run it yourself (keeps the box-side recipe self-contained and
+# Docker-portable).
 #
-# It deliberately holds NO GPU/Python/apt logic — that all lives in bootstrap.sh
-# so that file stays box-local and Docker-portable. This wrapper only does the
-# things that need YOUR laptop: your gh auth, your SSH key, your secrets.
+# What it sets up on the box:
+#   - git credentials (credential.helper store + ~/.git-credentials, from local gh)
+#   - git identity    (user.name / user.email, mirrored from THIS laptop)
+#   - optionally Claude (one of two auth branches)
+#   - a copy of bootstrap.sh at ~/bootstrap.sh
+#
+# Everything laptop-specific lives here (your gh auth, SSH key, git identity,
+# secrets). Nothing personal is hardcoded: the git identity is read from this
+# machine's own `git config`.
 #
 # Prerequisites (on this laptop):
-#   - gh authenticated              : gh auth status
-#   - SSH access to the instance    : ssh "$BOX" true   (key set up; see ../docs/cloud-setup.md)
-#   - for CLAUDE_AUTH=key           : Anthropic key stored at ~/.secrets/anthropic.api
+#   - gh authenticated        : gh auth status
+#   - git identity set        : git config user.name / user.email
+#   - SSH access to the box    : ssh "$HOST" true   (see ../docs/cloud-setup.md)
+#   - for CLAUDE_AUTH=key     : Anthropic key at ~/.secrets/anthropic.api
 #
 # Usage:
-#   ./local_bootstrap.sh user@host                     # bootstrap only (no Claude on the box)
-#   CLAUDE_AUTH=login ./local_bootstrap.sh user@host   # + Claude, you log in manually (uses your subscription)
-#   CLAUDE_AUTH=key   ./local_bootstrap.sh user@host   # + Claude, API key from ~/.secrets/anthropic.api
+#   ./local_bootstrap.sh HOST                      # HOST = hostname or user@host (whatever `ssh HOST` accepts)
+#   CLAUDE_AUTH=login ./local_bootstrap.sh HOST    # + install Claude, you log in manually (subscription)
+#   CLAUDE_AUTH=key   ./local_bootstrap.sh HOST    # + install Claude, key from ~/.secrets/anthropic.api
 #
-# Re-running is safe: every remote step is guarded / idempotent.
+# Then finish on the box:
+#   ssh HOST
+#   bash ~/bootstrap.sh
+#
+# Re-running is safe.
 #
 set -euo pipefail
 
 # ---- config ----------------------------------------------------------------
-BOX="${1:?usage: ./local_bootstrap.sh user@host   [CLAUDE_AUTH=key|login]}"
+HOST="${1:?usage: ./local_bootstrap.sh HOST   [CLAUDE_AUTH=key|login]}"
 CLAUDE_AUTH="${CLAUDE_AUTH:-none}"                     # none | key | login
 KEY_FILE="${KEY_FILE:-$HOME/.secrets/anthropic.api}"  # laptop path to the Anthropic key (CLAUDE_AUTH=key)
-HERE="$(cd "$(dirname "$0")" && pwd)"                  # this script's dir, so we can find bootstrap.sh
+HERE="$(cd "$(dirname "$0")" && pwd)"                  # this script's dir, to find bootstrap.sh
 # ---------------------------------------------------------------------------
 
 echo "== 1. check laptop prerequisites =="
 command -v gh >/dev/null || { echo "gh not installed on this laptop"; exit 1; }
 gh auth status >/dev/null 2>&1 || { echo "gh not authenticated — run: gh auth login"; exit 1; }
-ssh -o BatchMode=yes -o ConnectTimeout=10 "$BOX" true \
-  || { echo "cannot ssh to '$BOX' (check the address and your SSH key)"; exit 1; }
+NAME="$(git config --get user.name  || true)"
+EMAIL="$(git config --get user.email || true)"
+{ [ -n "$NAME" ] && [ -n "$EMAIL" ]; } \
+  || { echo "set your local git identity first: git config --global user.name/user.email"; exit 1; }
+ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" true \
+  || { echo "cannot ssh to '$HOST' (check the hostname and your SSH key)"; exit 1; }
 
-echo "== 2. copy GitHub credential to the box =="
-# gh mints the token locally; we stream it straight into a root-only file on the
-# box. It is never printed, never committed, never passed as an argv. The box-side
-# bootstrap.sh turns ~/.gh_token into a persistent git login.
-gh auth token | ssh "$BOX" 'umask 077; cat > ~/.gh_token'
+echo "== 2. configure git on the box (credentials + identity) =="
+# Identity: mirror THIS laptop's git config — nothing hardcoded.
+ssh "$HOST" "git config --global user.name \"$NAME\"; git config --global user.email \"$EMAIL\""
+# Credentials: persistent store, primed from local gh. The token is streamed over
+# stdin (read into a var on the box), never printed, never an argv, never committed.
+ssh "$HOST" 'git config --global credential.helper store'
+gh auth token | ssh "$HOST" \
+  'umask 077; read -r TOK; printf "https://x-access-token:%s@github.com\n" "$TOK" > ~/.git-credentials; chmod 600 ~/.git-credentials'
 
 echo "== 3. Claude on the box (CLAUDE_AUTH=$CLAUDE_AUTH) =="
 case "$CLAUDE_AUTH" in
@@ -56,9 +73,9 @@ case "$CLAUDE_AUTH" in
     # Install Claude; you finish auth interactively. The login flow works over a
     # plain SSH session: it prints a URL you open on your laptop and a code you
     # paste back. Nothing secret leaves your laptop here.
-    ssh "$BOX" 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
+    ssh "$HOST" 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
     echo "   Claude installed. Finish the login yourself:"
-    echo "       ssh $BOX"
+    echo "       ssh $HOST"
     echo "       claude        # it prints a URL — open it on your laptop, paste the code back"
     ;;
 
@@ -67,10 +84,10 @@ case "$CLAUDE_AUTH" in
     # Copy the key file to the same path on the box and export it for login
     # shells, so Claude runs non-interactively. API usage is billed pay-as-you-go.
     test -s "$KEY_FILE" || { echo "   no key at $KEY_FILE on this laptop (CLAUDE_AUTH=key needs it)"; exit 1; }
-    ssh "$BOX" 'umask 077; mkdir -p ~/.secrets; cat > ~/.secrets/anthropic.api' < "$KEY_FILE"
-    ssh "$BOX" 'grep -q ANTHROPIC_API_KEY ~/.bashrc \
+    ssh "$HOST" 'umask 077; mkdir -p ~/.secrets; cat > ~/.secrets/anthropic.api' < "$KEY_FILE"
+    ssh "$HOST" 'grep -q ANTHROPIC_API_KEY ~/.bashrc \
                 || echo "export ANTHROPIC_API_KEY=\$(cat ~/.secrets/anthropic.api)" >> ~/.bashrc'
-    ssh "$BOX" 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
+    ssh "$HOST" 'command -v claude >/dev/null || curl -fsSL https://claude.ai/install.sh | bash'
     echo "   Claude installed; key copied to ~/.secrets/anthropic.api and exported in ~/.bashrc on the box."
     ;;
 
@@ -79,10 +96,13 @@ case "$CLAUDE_AUTH" in
     ;;
 esac
 
-echo "== 4. run the box-side bootstrap over SSH =="
-# Stream this repo's bootstrap.sh to the box and run it. After it clones the repo,
-# the box carries its own copy for later re-runs:
-#     ssh "$BOX" 'cd control-kit && bash bootstrap.sh'
-ssh "$BOX" 'bash -s' < "$HERE/bootstrap.sh"
+echo "== 4. copy bootstrap.sh to the box =="
+scp "$HERE/bootstrap.sh" "$HOST:~/bootstrap.sh"
 
-echo "== done. connect with:  ssh $BOX =="
+cat <<EOF
+
+== done — box provisioned, bootstrap.sh is at ~/bootstrap.sh ==
+Finish on the box:
+    ssh $HOST
+    bash ~/bootstrap.sh
+EOF

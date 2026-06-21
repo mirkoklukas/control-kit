@@ -19,17 +19,24 @@ meant to re-run on a *similar* instance later (and to seed a future Docker image
 
 | script | runs on | job |
 |---|---|---|
-| [`local_bootstrap.sh`](local_bootstrap.sh) | your **laptop** | control plane: copy credentials, optionally install Claude on the box, then trigger the box-side setup over SSH |
-| [`bootstrap.sh`](bootstrap.sh) | the **box** | data plane: all system + app setup, no SSH, no secrets baked in — so it ports straight into a Dockerfile later |
+| [`local_bootstrap.sh`](local_bootstrap.sh) | your **laptop** | control plane: provision the box's git (credentials + identity), optionally install Claude, and copy `bootstrap.sh` over. Does **not** run it. |
+| [`bootstrap.sh`](bootstrap.sh) | the **box** | data plane: assumes a provisioned box, then does all system + app setup (clone, deps, GPU, examples). No SSH, no secrets, no personal identity — ports straight into a Dockerfile. |
 
-Keep the heavy lifting in `bootstrap.sh` (box-local, re-runnable, Docker-ready);
-`local_bootstrap.sh` is just the laptop-side wrapper that gets credentials there
-and kicks it off.
+The flow is two phases:
+
+1. **Laptop:** `./bootstrap/local_bootstrap.sh HOST` — sets up everything on the
+   box that `bootstrap.sh` needs (git login + identity, Claude if asked) and drops
+   `bootstrap.sh` at `~/bootstrap.sh`.
+2. **Box:** `ssh HOST`, then `bash ~/bootstrap.sh`.
+
+Keeping `bootstrap.sh` ignorant of who you are (no name/email, no token handling)
+is what makes it re-runnable and Docker-ready; all the personal/credential wiring
+stays in `local_bootstrap.sh`.
 
 ### Driving it: local-Claude over SSH vs Claude-on-the-box
 
 You can let **Claude run the setup from your laptop over SSH** — its Bash tool
-runs `ssh "$BOX" '…'` just fine, so it can verify the box, run the steps, read
+runs `ssh "$HOST" '…'` just fine, so it can verify the box, run the steps, read
 the output, and fix problems, all remotely. That's the simplest path for the
 bootstrap and needs **no Claude on the remote at all**.
 
@@ -44,51 +51,55 @@ The catch: Claude's **command** tool works over SSH, but its **file** tools
 
 Claude on the box has two auth branches (pick one):
 - **`CLAUDE_AUTH=login`** (use your subscription) — installs Claude, then *you*
-  finish login: `ssh "$BOX"` and run `claude`, which prints a URL to open on your
+  finish login: `ssh "$HOST"` and run `claude`, which prints a URL to open on your
   laptop and a code to paste back (works over SSH). Easiest if you have a Pro/Max
   plan.
 - **`CLAUDE_AUTH=key`** — reads your key from `~/.secrets/anthropic.api` on the
   laptop, copies it to the same path on the box, and exports it. Non-interactive,
   billed pay-as-you-go.
 
-Note: each `ssh "$BOX" 'cmd'` is a fresh shell (no carried-over cwd/env), so
+Note: each `ssh "$HOST" 'cmd'` is a fresh shell (no carried-over cwd/env), so
 chain commands (`cd repo && …`) or run scripts.
 
 ---
 
 ## Prerequisites (on your laptop)
 
-1. **`gh` is authenticated** (`gh auth status` is green). This is the source of
-   the GitHub credential — we never type a token by hand.
-2. **You can SSH into the instance** (key set up per
-   [cloud-setup.md](../docs/cloud-setup.md)). Call its address `$BOX`, e.g.
-   `ubuntu@203.0.113.10`.
-3. *(only for `CLAUDE_AUTH=key`)* your Anthropic key saved at
+1. **`gh` is authenticated** (`gh auth status` is green). The source of the
+   GitHub credential — we never type a token by hand.
+2. **Your local git identity is set** (`git config user.name` / `user.email`).
+   `local_bootstrap.sh` mirrors it onto the box, so nothing is hardcoded.
+3. **You can SSH into the instance** (key set up per
+   [cloud-setup.md](../docs/cloud-setup.md)). Its address is `$HOST` — a hostname
+   from `~/.ssh/config` or `user@ip`, anything `ssh "$HOST"` accepts.
+4. *(only for `CLAUDE_AUTH=key`)* your Anthropic key saved at
    **`~/.secrets/anthropic.api`** on the laptop. Get one at the Anthropic Console
    (`console.anthropic.com` → Settings → API keys); billed pay-as-you-go,
    separate from a Pro/Max subscription. Skip this if you'd rather use
    `CLAUDE_AUTH=login`.
 
-The easy path is to let the wrapper do the laptop side:
+### Phase 1 — provision from the laptop
 
 ```bash
-./local_bootstrap.sh "$BOX"                         # bootstrap only, no Claude on the box
-CLAUDE_AUTH=login ./local_bootstrap.sh "$BOX"       # + Claude, you log in on the box (subscription)
-CLAUDE_AUTH=key   ./local_bootstrap.sh "$BOX"       # + Claude, key from ~/.secrets/anthropic.api
+./bootstrap/local_bootstrap.sh "$HOST"                         # provision + copy bootstrap.sh; no Claude
+CLAUDE_AUTH=login ./bootstrap/local_bootstrap.sh "$HOST"       # + Claude, you log in on the box (subscription)
+CLAUDE_AUTH=key   ./bootstrap/local_bootstrap.sh "$HOST"       # + Claude, key from ~/.secrets/anthropic.api
 ```
 
-Under the hood that copies your git credential to the box (and runs
-`bootstrap.sh` there):
-
-```bash
-gh auth token | ssh "$BOX" 'umask 077; cat > ~/.gh_token'
-```
-
-`~/.gh_token` lands owner-only; step 3 turns it into a persistent git login so
-`clone`/`pull`/`commit`/`push` work for the life of the instance. The token never
+This configures the box's git **credentials** (a persistent `credential.helper
+store` primed from `gh auth token`) and **identity** (mirrored from your laptop),
+so `clone`/`pull`/`commit`/`push` work for the life of the instance — then copies
+`bootstrap.sh` to `~/bootstrap.sh`. The token is streamed over SSH stdin; it never
 appears in this repo, in either script, or in chat.
 
-> Security: `~/.gh_token`, `~/.git-credentials`, and (for `CLAUDE_AUTH=key`)
+### Phase 2 — run on the box
+
+```bash
+ssh "$HOST"
+bash ~/bootstrap.sh
+```
+
+> Security: `~/.git-credentials` and (for `CLAUDE_AUTH=key`)
 > `~/.secrets/anthropic.api` hold secrets in plaintext on the box. The gh token
 > carries your gh scopes (typically full repo read/write) and the API key bills
 > your account, so treat the instance as trusted; revoke (gh / Console) if it's
@@ -105,8 +116,8 @@ the next person can do it in one shot.
 **Deliverables**
 1. A working `.venv` where `jax.devices()` shows a `CudaDevice`, and both
    examples run to completion.
-2. **`bootstrap.sh`** at the repo root: every command that actually worked, in
-   order, idempotent enough to re-run. A v0 already exists — *correct it to match
+2. **`bootstrap/bootstrap.sh`**: every command that actually worked, in order,
+   idempotent enough to re-run. A v0 already exists — *correct it to match
    reality* as you go.
 3. A short **Recipe / changelog** section appended to the bottom of this doc:
    what the environment turned out to be, and every deviation from the steps
@@ -210,34 +221,22 @@ export PATH="$HOME/.local/bin:$PATH"
 uv --version
 ```
 
-### 3. Persistent git login + clone
+### 3. Clone
 
-Turn the `~/.gh_token` you handed over (Prerequisites) into a **persistent** git
-login: written to disk once, it survives for the life of the box, so `clone` /
-`pull` / `commit` / `push` all work with no further prompts, for this repo and any
-future repo on your account.
+Git is **already provisioned** by `local_bootstrap.sh` (Phase 1): a persistent
+`credential.helper store` primed from your gh token, plus your identity mirrored
+from the laptop. So `clone` / `pull` / `commit` / `push` just work — for this repo
+and any other on your account — and `bootstrap.sh` itself needs no token, name, or
+email. It only needs the repo URL.
 
 ```bash
-test -s ~/.gh_token || { echo "no ~/.gh_token — run the Prerequisites step from your laptop"; exit 1; }
-
-git config --global user.name  "Mirko Klukas"
-git config --global user.email "mirko.klukas@gmail.com"
-git config --global credential.helper store
-printf 'https://x-access-token:%s@github.com\n' "$(cat ~/.gh_token)" > ~/.git-credentials
-chmod 600 ~/.git-credentials
-
-# now clone (works because the credential store is primed). Add more repos here later.
-[ -d control-kit ] || git clone https://github.com/<owner>/control-kit.git control-kit
+test -f ~/.git-credentials || { echo "git not provisioned — run local_bootstrap.sh from your laptop first"; exit 1; }
+[ -d control-kit ] || git clone https://github.com/mirkoklukas/control-kit.git control-kit
 cd control-kit
 ```
 
-> If you're reading this file you likely already cloned the repo by hand. Still
-> run the credential block above so `pull`/`push` keep working, then just `cd`
-> into the repo. Record the exact clone URL in `bootstrap.sh`.
->
-> Don't hard-code the token into `bootstrap.sh` — it always reads from
-> `~/.gh_token`. Verify push works once: `git commit --allow-empty -m test &&
-> git push && git reset --hard HEAD~1` (only if you want write access confirmed).
+> Verify push works once if you like: `git commit --allow-empty -m test &&
+> git push && git reset --hard HEAD~1`.
 
 ### 4. Python deps (CPU baseline first)
 
@@ -350,9 +349,9 @@ uv run python examples/00_minimal.py
 uv run python examples/01_mpc_cartpole.py     # prints SWUNG UP
 ```
 
-all succeed, **and** on a *brand-new* identical box the only manual steps are the
-laptop handoff (`gh auth token | ssh "$BOX" '… > ~/.gh_token'`) followed by
-`bash bootstrap.sh` — no other fixups.
+all succeed, **and** on a *brand-new* identical box the only steps are the two
+phases — `./bootstrap/local_bootstrap.sh "$HOST"` from the laptop, then
+`ssh "$HOST"` + `bash ~/bootstrap.sh` — with no other fixups.
 
 ---
 
@@ -393,23 +392,25 @@ usage, assumptions) and per-step comments — read the top of each before runnin
 
 - **[`bootstrap.sh`](bootstrap.sh)** — the box-side setup, mapping 1:1 to
   steps 0–7 above. It's **v0**: the steps above are written so you *verify it
-  against a real box on the first run and correct it in place*. Config (git
-  identity, `REPO_URL`, workdir) is at the top; no secrets.
+  against a real box on the first run and correct it in place*. Config
+  (`REPO_URL`, workdir) is at the top; no secrets, no personal identity.
 - **[`local_bootstrap.sh`](local_bootstrap.sh)** — the laptop-side wrapper:
-  checks prereqs, copies the gh token, optionally installs Claude on the box via
-  `CLAUDE_AUTH=login` or `CLAUDE_AUTH=key` (see above), then runs `bootstrap.sh`
-  on the box over SSH.
+  checks prereqs, provisions the box's git (credentials + identity), optionally
+  installs Claude (`CLAUDE_AUTH=login` or `CLAUDE_AUTH=key`), and copies
+  `bootstrap.sh` to `~/bootstrap.sh`. It does **not** run it.
 
-First run, from the repo root, by hand or via local-Claude over SSH:
+Phase 1, from the repo root (by hand or via local-Claude over SSH):
 
 ```bash
-./bootstrap/local_bootstrap.sh "$BOX"        # uses bootstrap/bootstrap.sh under the hood
+./bootstrap/local_bootstrap.sh "$HOST"
 ```
 
-Re-run on the box later (it carries its own copy after the clone):
+Phase 2, on the box:
 
 ```bash
-ssh "$BOX" 'cd control-kit && bash bootstrap/bootstrap.sh'
+ssh "$HOST"
+bash ~/bootstrap.sh
+# re-runs later, from the clone: bash ~/control-kit/bootstrap/bootstrap.sh
 ```
 
 > `bootstrap.sh` clones `REPO_URL`, which defaults to
