@@ -9,18 +9,33 @@ exploration proposal, and the cost. The task: make the radial hexapod walk
 What's different from the cartpole:
 
   * The 18 actuators are POSITION servos, so `ctrl` is a vector of target joint
-    angles (radians), not a force. The cold proposal samples zero-mean targets
-    around the rest pose (all-zero = the splayed standing pose) and clips each
-    one to its joint's range, so every candidate is a feasible stance.
+    angles (radians), not a force. The proposal builds each step's target by
+    integrating noise into the *previous* target -- a correlated (Brownian)
+    random walk -- clipped to each joint's range. This is the key to getting
+    motion: a zero-mean proposal around the rest pose is held there by the stiff
+    servo and its candidates average out to "stand still"; even anchoring the
+    noise to the current *achieved* angle mean-reverts (the servo pulls it back).
+    Integrating into the target lets candidate rollouts drift through large,
+    sustained arcs (~8x the limb excursion of the zero-mean / achieved-angle
+    variants). That widens *exploration*; the executed motion is still throttled,
+    because cold MPPI averages the candidates' first step back toward zero --
+    warm-start (carrying the plan forward as the nominal) is the fix for that.
+    See docs/mpc.md.
   * The cost is on the free-floating trunk: reward forward speed while keeping
     the body upright, level, on its line, and not spinning. Stability is
     weighted above progress on purpose -- a hexapod that face-plants scores far
     worse than one that creeps.
+  * Control runs at ~31 Hz, not the 250 Hz sim rate: each planned target is held
+    for DECIMATION sim steps. At 250 Hz a receding-horizon plan only ever
+    executes one 4 ms step and the legs barely move before re-planning (and 39/40
+    of each plan is thrown away). Decimating lets each decision drive real motion,
+    spans a gait cycle in the horizon, and gives the executed step enough credit
+    that it stops averaging back to "stand still".
 
-This is the *cold* version (zero-mean proposal every tick, no warm-start), the
-direct analog of the cold cartpole. Cold re-planning struggles to commit to a
-multi-tick gait the same way it struggles with pendulum pumping; expect a
-cautious shuffle, not a clean trot. Warm-starting is the next step (docs/mpc.md).
+There's still no cross-tick warm-start (the plan isn't carried forward), so this
+stays close to the cold cartpole; but the residual (around-current) proposal
+gives the per-tick exploration the temporal structure a zero-mean proposal
+lacks. A previous-plan nominal is the next step (docs/mpc.md).
 
 MJX has no viewer and only flies on CUDA/TPU (CPU works but is slow; the Apple
 GPU can't run MJX at all -- see docs/gotchas.md), so the loop is split in two:
@@ -57,13 +72,14 @@ ROOT = Path(__file__).resolve().parent.parent
 MODEL = ROOT / "models" / "hexapod.xml"
 DEFAULT_OUT = ROOT / "runs" / "hexapod.npz"
 
-# MPPI hyperparameters (dt = 0.004 s for this model)
-HORIZON = 40          # T: planning steps (0.16 s lookahead)
+# MPPI hyperparameters (sim dt = 0.004 s; we control every DECIMATION sim steps)
+DECIMATION = 8        # hold each planned target for this many sim steps (~31 Hz control)
+HORIZON = 20          # T: planning steps -> 0.64 s lookahead at DECIMATION=8 (a gait cycle)
 SAMPLES = 128         # N: candidate rollouts per tick
-LAMBDA = 0.5          # temperature: lower -> greedier
-NOISE_SIGMA = 0.35    # exploration std on target angles (rad), around the rest pose
-STEPS = 300           # real-system steps (1.2 s)
-LOG_EVERY = 10        # print a progress line every this many steps
+LAMBDA = 0.2          # temperature: lower -> greedier (commit harder to the best candidate)
+NOISE_SIGMA = 0.1     # per-control-step increment integrated into the target (rad)
+STEPS = 150           # control decisions to record (150 * 8 * 0.004 = 4.8 s)
+LOG_EVERY = 10        # print a progress line every this many control steps
 
 # Task targets
 VX_TARGET = 0.3       # desired forward speed (m/s)
@@ -78,14 +94,20 @@ app = typer.Typer(
 
 
 def get_obs(key, s):
-    """Slim trunk observation: pose + twist of the free-floating body.
+    """Observation: trunk pose + twist, then the previous target (s.ctrl).
 
-    Layout (13): [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz].
+    Layout (31): [x, y, z, qw, qx, qy, qz, vx, vy, vz, wx, wy, wz | u0..u17].
+    The cost reads only the leading trunk block [0:13]. The trailing 18 entries
+    are the *previous* position-servo targets -- MJX keeps the ctrl we set in the
+    state -- and the proposal integrates noise into them, a random walk on the
+    target itself, which is what gives the limbs large, sustained motion. (Anchor
+    the noise to the achieved angle qpos[7:] instead and the stiff servo just
+    pulls it back to rest: ~8x less limb travel, measured.)
     For the freejoint, qpos[0:3] is world position, qpos[3:7] the orientation
-    quaternion, qvel[0:3] the world-frame linear velocity, qvel[3:6] the
-    body-frame angular velocity.
+    quaternion, qvel[0:3] world-frame linear velocity, qvel[3:6] body-frame
+    angular velocity.
     """
-    return jnp.concatenate([s.qpos[0:3], s.qpos[3:7], s.qvel[0:6]])
+    return jnp.concatenate([s.qpos[0:3], s.qpos[3:7], s.qvel[0:6], s.ctrl])
 
 
 def cost(y):
@@ -127,12 +149,16 @@ def make_controller(mjx_model, ctrl_lo, ctrl_hi, horizon, samples, lam):
     """
     nu = mjx_model.nu
 
-    def env_step(s, u):
-        return mjx.step(mjx_model, s.replace(ctrl=u))
+    def env_step(s, u):                        # hold the target for DECIMATION sim steps
+        def sub(s, _):
+            return mjx.step(mjx_model, s.replace(ctrl=u)), None
+        s, _ = jax.lax.scan(sub, s, None, length=DECIMATION)
+        return s
 
-    def explore(key, y):                       # cold proposal: zero-mean targets...
-        u = NOISE_SIGMA * jax.random.normal(key, (nu,))
-        return jnp.clip(u, ctrl_lo, ctrl_hi)   # ...clipped to feasible joint ranges
+    def explore(key, y):                       # proposal: integrate noise into the
+        prev = y[13:13 + nu]                   # previous target (s.ctrl) -> a Brownian
+        u = prev + NOISE_SIGMA * jax.random.normal(key, (nu,))   # random walk on the
+        return jnp.clip(u, ctrl_lo, ctrl_hi)   # target; clipped to joint ranges
 
     sampler = make_rollout_sampler(env_step, explore, get_obs)
     planner = make_mppi_planner(sampler, cost, horizon, samples, lam)
@@ -216,7 +242,8 @@ def record(
     np.savez(
         out,
         qpos=np.stack(qpos), qvel=np.stack(qvel), ctrl=np.stack(ctrl),
-        timestep=mj_model.opt.timestep, model=str(MODEL.relative_to(ROOT)),
+        timestep=mj_model.opt.timestep * DECIMATION,   # frame spacing for real-time replay
+        model=str(MODEL.relative_to(ROOT)),
     )
     print(f"saved {len(qpos)} frames -> {out}")
 

@@ -30,3 +30,19 @@ uv run python examples/02_mpc_hexapod.py record --steps 8 --samples 16 --horizon
 # viewer
 uv run mjpython examples/02_mpc_hexapod.py play runs/hexapod.npz
 ```
+
+## Pulling results back from the GPU box
+
+`record` runs headless on the remote box and writes the `.npz`; `play` needs a
+display, so it runs locally. Copy the trajectory down (assumes an `ssh lambda`
+alias in `~/.ssh/config`; run from the local repo root so it lands in `runs/`):
+
+```bash
+# single file
+scp lambda:~/control-kit/runs/hexapod.npz runs/hexapod.npz
+
+# or sync the whole runs/ dir (skips unchanged bytes; good for repeated pulls)
+rsync -avz lambda:~/control-kit/runs/ runs/
+```
+
+Adjust the remote path if the repo lives somewhere other than `~/control-kit`.
