@@ -53,7 +53,7 @@ SAMPLES = 100         # N: candidate rollouts per tick
 LAMBDA = 1.0          # temperature: lower -> greedier
 NOISE_SIGMA = 6.0     # exploration std on control (N)
 CTRL_MIN, CTRL_MAX = -20.0, 20.0
-STEPS = 150           # real-system steps (1.5 s)
+STEPS = 250           # real-system steps (2.5 s)
 LOG_EVERY = 10        # print a progress line every this many steps
 
 app = typer.Typer(
