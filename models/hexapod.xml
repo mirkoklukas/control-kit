@@ -16,12 +16,15 @@
       <position kp="25" kv="2.5" forcerange="-15 15"/>
       <default class="coxa">
         <joint axis="0 0 1" range="-45 45"/>
+        <geom rgba="0.85 0.2 0.2 1"/>
       </default>
       <default class="femur">
         <joint axis="0 1 0" range="-75 75"/>
+        <geom rgba="0.2 0.4 0.85 1"/>
       </default>
       <default class="tibia">
         <joint axis="0 1 0" range="-110 30"/>
+        <geom rgba="0.9 0.8 0.15 1"/>
       </default>
     </default>
   </default>
@@ -59,13 +62,13 @@
       <!-- corner @ 30 deg : front-left -->
       <body name="coxa_FL" pos="0.10392 0.06 0" euler="0 0 30" childclass="hexapod">
         <joint name="coxa_FL" class="coxa"/>
-        <geom fromto="0 0 0 0.06 0 0"/>
+        <geom class="coxa" fromto="0 0 0 0.06 0 0"/>
         <body name="femur_FL" pos="0.06 0 0">
           <joint name="femur_FL" class="femur"/>
-          <geom fromto="0 0 0 0.10 0 0"/>
+          <geom class="femur" fromto="0 0 0 0.10 0 0"/>
           <body name="tibia_FL" pos="0.10 0 0">
             <joint name="tibia_FL" class="tibia"/>
-            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom class="tibia" fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
             <geom name="foot_FL" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
             <site name="foot_FL" pos="0.05 0 -0.19" size="0.012"/>
           </body>
@@ -75,13 +78,13 @@
       <!-- corner @ 90 deg : mid-left -->
       <body name="coxa_ML" pos="0.0 0.12 0" euler="0 0 90" childclass="hexapod">
         <joint name="coxa_ML" class="coxa"/>
-        <geom fromto="0 0 0 0.06 0 0"/>
+        <geom class="coxa" fromto="0 0 0 0.06 0 0"/>
         <body name="femur_ML" pos="0.06 0 0">
           <joint name="femur_ML" class="femur"/>
-          <geom fromto="0 0 0 0.10 0 0"/>
+          <geom class="femur" fromto="0 0 0 0.10 0 0"/>
           <body name="tibia_ML" pos="0.10 0 0">
             <joint name="tibia_ML" class="tibia"/>
-            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom class="tibia" fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
             <geom name="foot_ML" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
             <site name="foot_ML" pos="0.05 0 -0.19" size="0.012"/>
           </body>
@@ -91,13 +94,13 @@
       <!-- corner @ 150 deg : back-left -->
       <body name="coxa_BL" pos="-0.10392 0.06 0" euler="0 0 150" childclass="hexapod">
         <joint name="coxa_BL" class="coxa"/>
-        <geom fromto="0 0 0 0.06 0 0"/>
+        <geom class="coxa" fromto="0 0 0 0.06 0 0"/>
         <body name="femur_BL" pos="0.06 0 0">
           <joint name="femur_BL" class="femur"/>
-          <geom fromto="0 0 0 0.10 0 0"/>
+          <geom class="femur" fromto="0 0 0 0.10 0 0"/>
           <body name="tibia_BL" pos="0.10 0 0">
             <joint name="tibia_BL" class="tibia"/>
-            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom class="tibia" fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
             <geom name="foot_BL" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
             <site name="foot_BL" pos="0.05 0 -0.19" size="0.012"/>
           </body>
@@ -107,13 +110,13 @@
       <!-- corner @ 210 deg : back-right -->
       <body name="coxa_BR" pos="-0.10392 -0.06 0" euler="0 0 210" childclass="hexapod">
         <joint name="coxa_BR" class="coxa"/>
-        <geom fromto="0 0 0 0.06 0 0"/>
+        <geom class="coxa" fromto="0 0 0 0.06 0 0"/>
         <body name="femur_BR" pos="0.06 0 0">
           <joint name="femur_BR" class="femur"/>
-          <geom fromto="0 0 0 0.10 0 0"/>
+          <geom class="femur" fromto="0 0 0 0.10 0 0"/>
           <body name="tibia_BR" pos="0.10 0 0">
             <joint name="tibia_BR" class="tibia"/>
-            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom class="tibia" fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
             <geom name="foot_BR" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
             <site name="foot_BR" pos="0.05 0 -0.19" size="0.012"/>
           </body>
@@ -123,13 +126,13 @@
       <!-- corner @ 270 deg : mid-right -->
       <body name="coxa_MR" pos="0.0 -0.12 0" euler="0 0 270" childclass="hexapod">
         <joint name="coxa_MR" class="coxa"/>
-        <geom fromto="0 0 0 0.06 0 0"/>
+        <geom class="coxa" fromto="0 0 0 0.06 0 0"/>
         <body name="femur_MR" pos="0.06 0 0">
           <joint name="femur_MR" class="femur"/>
-          <geom fromto="0 0 0 0.10 0 0"/>
+          <geom class="femur" fromto="0 0 0 0.10 0 0"/>
           <body name="tibia_MR" pos="0.10 0 0">
             <joint name="tibia_MR" class="tibia"/>
-            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom class="tibia" fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
             <geom name="foot_MR" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
             <site name="foot_MR" pos="0.05 0 -0.19" size="0.012"/>
           </body>
@@ -139,13 +142,13 @@
       <!-- corner @ 330 deg : front-right -->
       <body name="coxa_FR" pos="0.10392 -0.06 0" euler="0 0 330" childclass="hexapod">
         <joint name="coxa_FR" class="coxa"/>
-        <geom fromto="0 0 0 0.06 0 0"/>
+        <geom class="coxa" fromto="0 0 0 0.06 0 0"/>
         <body name="femur_FR" pos="0.06 0 0">
           <joint name="femur_FR" class="femur"/>
-          <geom fromto="0 0 0 0.10 0 0"/>
+          <geom class="femur" fromto="0 0 0 0.10 0 0"/>
           <body name="tibia_FR" pos="0.10 0 0">
             <joint name="tibia_FR" class="tibia"/>
-            <geom fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
+            <geom class="tibia" fromto="0 0 0 0.05 0 -0.19" size="0.010"/>
             <geom name="foot_FR" type="sphere" pos="0.05 0 -0.19" size="0.018" rgba="0.15 0.15 0.2 1"/>
             <site name="foot_FR" pos="0.05 0 -0.19" size="0.012"/>
           </body>
