@@ -38,11 +38,8 @@ On a GPU box you can still force CPU without a separate env:
 Quick sanity check (headless, no display needed):
 
 ```bash
-uv run python examples/01_mpc_cartpole.py     # MPPI swing-up, prints SWUNG UP
+uv run python examples/01_mpc_cartpole.py record   # MPPI swing-up (cold: pumps but doesn't fully catch yet)
 ```
-
-For standing up a fresh GPU instance end to end, see
-[bootstrap/cloud-bootstrap.md](bootstrap/cloud-bootstrap.md).
 
 ## Examples
 

@@ -11,13 +11,14 @@ dependencies = [
     # RL
     "gymnasium[mujoco]>=0.29",
     "stable-baselines3>=2.3",
+    "typer>=0.26.7",
 ]
 
 [project.optional-dependencies]
 dev = ["ipython", "ruff"]
 mjx = ["mujoco-mjx==3.9.0"]
 # GPU JAX (Linux + NVIDIA only). Inherits the jax version resolved by `mjx`;
-# the marker keeps it off macOS, where no CUDA wheels exist. See README / docs/cloud-bootstrap.md.
+# the marker keeps it off macOS, where no CUDA wheels exist. See README.
 gpu = ["jax[cuda12]; sys_platform == 'linux'"]
 
 [tool.ruff]
