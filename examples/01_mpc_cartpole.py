@@ -45,7 +45,7 @@ from controlkit.mpc import make_mppi_planner, make_rollout_sampler  # noqa: E402
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = ROOT / "models" / "cartpole.xml"
-DEFAULT_OUT = ROOT / "runs" / "01_cartpole.npz"
+DEFAULT_OUT = ROOT / "runs" / "cartpole.npz"
 
 # MPPI hyperparameters
 HORIZON = 30          # T: planning steps (0.30 s at dt=0.01)
