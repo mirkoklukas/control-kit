@@ -1,0 +1,10 @@
+# The "context" half of a run spec: where/how a run is staged (not the params).
+# Load explicitly with --context=run.context.yaml.
+# All paths absolute (keeps capture independent of where you launch from).
+
+repos_in_dev:
+  control-kit: /Users/mirkoklukas/Workspace/control-kit
+
+runs_root: /Users/mirkoklukas/Workspace/control-kit/runs   # per-run dirs created under here
+lockfile:  /Users/mirkoklukas/Workspace/control-kit/uv.lock # hashed into provenance.json
+allow_dirty: false                  # refuse to launch with uncommitted code
