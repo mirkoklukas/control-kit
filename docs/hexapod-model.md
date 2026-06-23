@@ -56,11 +56,11 @@ scalar. Read it as:
 
 Signs verified by perturbing the FL leg one joint at a time:
 
-| Joint | axis (leg-local) | meaning | `range` | sign (measured) |
-|-------|------------------|---------|---------|-----------------|
-| coxa  | `0 0 1` (= world up) | yaw / horizontal swing | `-45 45` | **+** swings leg CCW seen from above; foot stays at constant z |
-| femur | `0 1 0` | lift | `-75 75` | **−** raises foot, **+** lowers it |
-| tibia | `0 1 0` | knee | `-110 30` | **+** flexes (foot tucks in), **−** extends (foot out and up) |
+| Joint | axis (leg-local)     | meaning                | `range`   | sign (measured)                                                |
+| ----- | -------------------- | ---------------------- | --------- | -------------------------------------------------------------- |
+| coxa  | `0 0 1` (= world up) | yaw / horizontal swing | `-45 45`  | **+** swings leg CCW seen from above; foot stays at constant z |
+| femur | `0 1 0`              | lift                   | `-75 75`  | **−** raises foot, **+** lowers it                             |
+| tibia | `0 1 0`              | knee                   | `-110 30` | **+** flexes (foot tucks in), **−** extends (foot out and up)  |
 
 Hard numbers behind the signs: `femur_FL +20°` dropped the foot 40 mm in z;
 `−20°` raised it 63 mm. `coxa_FL ±20°` moved the foot purely horizontally

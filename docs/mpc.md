@@ -1,9 +1,7 @@
 # MPC / MPPI notes
 
 Working notes for the sampling-based MPC we're building in
-[`src/controlkit/mpc.py`](../src/controlkit/mpc.py), rewriting
-[`examples/03_mpc_cartpole.py`](../examples/03_mpc_cartpole.py) on top of MJX.
-Living doc, prune later.
+[`src/controlkit/mpc.py`](../src/controlkit/mpc.py). Living doc, prune later.
 
 ## What MPC is (receding horizon)
 
