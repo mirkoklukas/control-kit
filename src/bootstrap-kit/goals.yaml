@@ -1,0 +1,20 @@
+# goals.yaml — the ONLY file you write. The definition of done.
+#
+# Every entry is a TASK: something that can go green or red via its `pass`
+# command. Tasks come in flavors (repo, system, filesystem, ...) but share one
+# shape:
+#
+#   name   short id, used in bootstrap.sh section headers and logs
+#   type   flavor — for grouping/readability (repo | system | filesystem | ...)
+#   do     OPTIONAL. The high-level intent of what to set up. The agent
+#          discovers the concrete steps and writes them into bootstrap.sh.
+#          Omit for pure assertions that just have to hold true.
+#   pass   REQUIRED. The oracle: a command that exits 0 when this task is done.
+#          If you don't know the exact command, describe it; the goal is for it
+#          to become a real runnable check.
+
+tasks:
+  - name: foo
+    type: repo
+    do:   install https://github.com/mirkoklukas/control-kit
+    pass: uv run python examples/01_mpc_cartpole.py record

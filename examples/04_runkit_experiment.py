@@ -27,7 +27,7 @@ class HexapodConfig:
 
 # --- THE RUN: receives a prepared ctx, just trains into ctx.out ---
 @experiment(name="hexapod")
-def run(cfg: HexapodConfig, *, ctx: RunContext):
+def run(cfg: HexapodConfig, ctx: RunContext):
     ckpt = ctx.out / "checkpoints"
     reward = 0.0
     for step in range(0, cfg.num_timesteps, 250_000):
