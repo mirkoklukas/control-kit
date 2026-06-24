@@ -4,9 +4,9 @@ Read this before you start and honor it throughout the run.
 
 ## Constraints
 
-- **Install to local disk, not the NFS mount (`/lambda/nfs/workspace`).** Clone repos to `~/` and
+- **Clone repos to `~/`**
+- **Install to local disk (`~/`), not the NFS mount (`/lambda/nfs/workspace`).** Clone repos to `~/` and
   create venvs on the instance's own disk.
-  (Checkable half: the `not-on-nfs` task in `goals.yaml`.)
   Why: NFS cripples Python install/import performance — thousands of tiny-file
   ops become network round-trips — and a shared mount breaks the clean-room
   guarantee, since the next "fresh" box would see prior installs.
