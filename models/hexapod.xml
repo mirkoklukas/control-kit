@@ -1,6 +1,8 @@
 <mujoco model="hexapod">
   <compiler angle="degree" autolimits="true"/>
-  <option timestep="0.004" integrator="implicitfast"/>
+  <!-- Newton defaults to 100/50 iterations; a hexapod converges in far fewer, and
+       MJX runs them as a fixed batched loop, so trimming these is a big speedup. -->
+  <option timestep="0.004" integrator="implicitfast" iterations="10" ls_iterations="8"/>
 
   <!-- Radial hexapod: a hexagonal base with one leg at each of the 6 corners.
        Corners sit at angles 30, 90, 150, 210, 270, 330 deg (circumradius 0.12), so each
@@ -9,7 +11,10 @@
        leg body is rotated about z by its corner angle and the same recipe is reused.
        At all-zero joint angles the legs splay out and down into a standing pose. -->
   <default>
-    <geom density="600" friction="1.0 0.5 0.5"/>
+    <!-- Collision filtering: robot geoms collide with the floor only (contype=0,
+         conaffinity=1), never each other; the floor sets contype=1 below. Cuts the
+         broad-phase pairs ~12x (312 -> 26), the main MJX per-step cost here. -->
+    <geom density="600" friction="1.0 0.5 0.5" contype="0" conaffinity="1"/>
     <default class="hexapod">
       <joint type="hinge" armature="0.008" damping="0.4" frictionloss="0.02"/>
       <geom type="capsule" size="0.012" rgba="0.55 0.58 0.62 1"/>
@@ -62,7 +67,7 @@
 
   <worldbody>
     <light pos="0 0 2.0" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
-    <geom name="floor" type="plane" size="0 0 0.05" material="grid"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid" contype="1" conaffinity="1"/>
 
     <body name="base" pos="0 0 0.20">
       <freejoint name="root"/>
