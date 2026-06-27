@@ -1,0 +1,11 @@
+# Tiny local wiring check: compiles & runs end-to-end, won't learn. CPU ~1-2 min.
+#   uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/smoke.yaml --tag=smoke
+num_envs: 32
+num_timesteps: 16384
+num_eval_envs: 32
+num_evals: 2
+batch_size: 32
+num_minibatches: 2
+num_updates_per_batch: 1
+unroll_length: 10
+episode_length: 60

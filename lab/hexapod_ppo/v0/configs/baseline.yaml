@@ -1,0 +1,4 @@
+# Baseline A100-40GB: walk straight +x, full 50M-step budget (config.py defaults).
+# num_evals is the only progress lever in brax PPO (progress_fn fires once per eval).
+#   uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/baseline.yaml --tag=baseline
+num_evals: 40    # eval every ~2 training steps -> ~40 prints, ~2% over the 50M budget

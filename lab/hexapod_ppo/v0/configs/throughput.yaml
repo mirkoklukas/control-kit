@@ -1,0 +1,7 @@
+# Like baseline, but a wider env batch to push A100 utilization / shorter wall-clock.
+# Same 50M sample budget; num_envs only sets collection parallelism, so this just
+# halves the sequential unrolls per training step (8 -> 4). The invariant holds:
+# batch_size*num_minibatches = 32768 stays divisible by num_envs.
+#   uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/throughput.yaml --tag=throughput
+num_evals: 40
+num_envs: 8192
