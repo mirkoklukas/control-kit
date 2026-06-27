@@ -58,7 +58,6 @@ in ENVIRONMENT.md.
 - **Idempotent**: re-running must not double-clone or choke on existing state
   (`[ -d repo ] || git clone`, `dpkg -s pkg >/dev/null 2>&1 || apt-get install`).
   You'll rerun it many times while building it, and the next box may too.
-- **Pin refs**: check out the exact tag/SHA from `goals.yaml`, never `main`.
 - Assume human-provided prerequisites (credentials, tokens) already exist; fail
   loudly if they don't — don't try to provision them (see BLOCKERS).
 

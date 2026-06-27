@@ -5,7 +5,7 @@ Run:
     # or, equivalently:
     uv run runkit run examples/04_runkit_experiment.py seed=7 --tag=baseline
 
-The @experiment decorator creates the run dir, captures provenance, etc.
+The @experiment decorator creates the run dir and freezes the resolved config.
 This file describes only WHAT to run (the Config + body); never WHERE it
 lands or HOW it's tracked.
 """
@@ -29,6 +29,7 @@ class HexapodConfig:
 @experiment(name="hexapod")
 def run(cfg: HexapodConfig, ctx: RunContext):
     ckpt = ctx.out / "checkpoints"
+    ckpt.mkdir(parents=True, exist_ok=True)
     reward = 0.0
     for step in range(0, cfg.num_timesteps, 250_000):
         reward = cfg.lin_vel_weight * (1 - math.exp(-step / 4e5)) \

@@ -1,6 +1,16 @@
 # controlkit
 
-A project for learning and experimenting with simulation environments and RL and control in general
+A project for learning and experimenting with simulation environments and RL and control in general. 
+The main goal is locomotion for a hexapod robot platform.
+
+## Preferences
+- The user primarily codes and is proficient in Python.
+- Keep answers crisp, clear, and to the point — don't say something for the sake of it.
+- Ask if things are not clear, rather than making implicit assumptions.
+- Plan and ask for confirmation before starting to code.
+- Make sure not to delete non-tracked files (git) without explicitly cross-checking with me.
+- Do not edit any files if it is not clear that you should, especially when we are brainstorming about a solution.
+- Plan and think first before writing code.
 
 ## How to work with notes
 - Notes are **living documents**. Don't pre-fill or over-structure them.
@@ -23,3 +33,8 @@ A project for learning and experimenting with simulation environments and RL and
   `$$` block with bare newlines (no `\\`); avoid `\displaylines`.
 - Go easy on em-dashes; a comma, semicolon, parentheses, or a sentence split usually works
   better.
+
+## Project Context
+Project-specific docs (load on demand):
+- `docs/repo-structure.md`  It is NOT an inventory and may be incomplete — never use it to find a file by filename, and 
+  never use it as a substitute for inspecting the filesystem.

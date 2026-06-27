@@ -14,7 +14,12 @@
 #          to become a real runnable check.
 
 tasks:
-  - name: foo
+  - name: run-kit
+    type: repo
+    do:   install https://github.com/mirkoklukas/run-kit
+    pass: uv run python examples/01_mpc_cartpole.py record
+    
+  - name: control-kit
     type: repo
     do:   install https://github.com/mirkoklukas/control-kit
     pass: uv run python examples/01_mpc_cartpole.py record

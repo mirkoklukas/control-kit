@@ -1,7 +1,7 @@
 # controlkit
 
 A MuJoCo playground for control algorithms — classical control, model-predictive
-control, and reinforcement learning — built around a simple cartpole.
+control, and reinforcement learning. The main target robotic platform is a hexapod. 
 
 ## Setup
 
@@ -39,25 +39,6 @@ Quick sanity check (headless, no display needed):
 
 ```bash
 uv run python examples/01_mpc_cartpole.py record   # MPPI swing-up (cold: pumps but doesn't fully catch yet)
-```
-
-## Examples
-
-| File | Algorithm | What it does |
-|------|-----------|--------------|
-| `examples/01_viewer.py` | — | Opens the interactive viewer; pole falls freely |
-| `examples/02_lqr_cartpole.py` | LQR | Linearizes dynamics (finite-diff) + discrete Riccati to balance upright |
-| `examples/03_mpc_cartpole.py` | MPPI (sampling MPC) | Nonlinear swing-up from hanging down, then balance |
-| `examples/04_rl_cartpole.py` | PPO | Learned policy via Gymnasium MuJoCo env + stable-baselines3 |
-
-Each control example runs **headless** by default (prints a result) and takes
-`--render` to open the live viewer.
-
-```bash
-uv run python examples/02_lqr_cartpole.py --render
-uv run python examples/03_mpc_cartpole.py --render
-uv run python examples/04_rl_cartpole.py --train --steps 100000
-uv run python examples/04_rl_cartpole.py --render
 ```
 
 ## Note on the viewer

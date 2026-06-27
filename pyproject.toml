@@ -13,24 +13,29 @@ dependencies = [
     "stable-baselines3>=2.3",
     "typer>=0.26.7",
     "pyyaml>=6",
+    "runkit",
 ]
-
-[project.scripts]
-runkit = "runkit.cli:app"
 
 [project.optional-dependencies]
 dev = ["ipython", "ruff"]
 mjx = ["mujoco-mjx==3.9.0"]
+# PPO training (Brax) on top of MJX. Pulls flax/optax/orbax. Run with
+# `uv run --extra ppo ...`; includes the mjx stack.
+ppo = ["controlkit[mjx]", "brax>=0.10"]
 # GPU JAX (Linux + NVIDIA only). Inherits the jax version resolved by `mjx`;
 # the marker keeps it off macOS, where no CUDA wheels exist. See README.
 gpu = ["jax[cuda12]; sys_platform == 'linux'"]
+
+# runkit lives in its own repo now; consumed as a local editable checkout.
+[tool.uv.sources]
+runkit = { path = "../run-kit", editable = true }
 
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
-packages = ["src/controlkit", "src/runkit"]
+packages = ["src/controlkit", "lab"]
 
 [tool.ruff]
 line-length = 100

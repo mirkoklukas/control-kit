@@ -4,7 +4,7 @@ Read this before you start and honor it throughout the run.
 
 ## Constraints
 
-- **Clone repos to `~/`**
+- **Clone repos to `~/`**. You are likely in `~/bootstrap-kit`
 - **Install to local disk (`~/`), not the NFS mount (`/lambda/nfs/workspace`).** Clone repos to `~/` and
   create venvs on the instance's own disk.
   Why: NFS cripples Python install/import performance — thousands of tiny-file

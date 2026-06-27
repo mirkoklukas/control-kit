@@ -36,9 +36,11 @@ OUT = ROOT / "runs" / "femur_forces.png"
 
 LIFT = -0.6                                   # femur target (rad); negative raises the foot
 RAMP = 0.6                                    # seconds to ramp the lift in (avoids a servo-force spike)
+LEGS = ["FL", "ML", "BL", "BR", "MR", "FR"]   # <replicate> index 0..5 (CCW from the +x corner)
 LIFTED_LEGS = {"ML", "FR", "BR"}              # which legs to lift (the rest form the tripod)
-FEMURS = ["femur_FL", "femur_ML", "femur_BL", "femur_BR", "femur_MR", "femur_FR"]
-PLANTED_FEET = ["foot_FL", "foot_BL", "foot_MR"]
+FEMURS = [f"femur{i}" for i in range(6)]      # femur actuator/joint name per leg index
+PLANTED = [i for i, lab in enumerate(LEGS) if lab not in LIFTED_LEGS]   # planted leg indices
+PLANTED_FEET = [f"foot{i}" for i in PLANTED]  # planted-foot geom names (LEGS[i] for the label)
 REC_EVERY = 5                                 # record a femur-force sample every N sim steps
 SPHERE_R = 0.043                              # radius of the femur-force marker spheres (m)
 FORCE_SCALE = 1.0                             # |actuator torque| (N*m) that saturates the color
@@ -85,10 +87,10 @@ def plot_femur(times, forces, out):
     """Plot femur actuator torque per leg; planted solid, lifted dashed."""
     import matplotlib.pyplot as plt
     fig, ax = plt.subplots(figsize=(9, 5))
-    for i, lab in enumerate(FEMURS):
-        lifted = lab.split("_")[1] in LIFTED_LEGS
+    for i, leg in enumerate(LEGS):
+        lifted = leg in LIFTED_LEGS
         ax.plot(times, forces[:, i], "--" if lifted else "-",
-                label=f"{lab} ({'lifted' if lifted else 'planted'})")
+                label=f"{leg} ({'lifted' if lifted else 'planted'})")
     ax.set_xlabel("time (s)")
     ax.set_ylabel("femur actuator torque (N*m)")
     ax.set_title("Femur actuator torque per leg -- tripod stance")
@@ -118,7 +120,7 @@ def main():
     # all femurs (for logging) and just the lifted ones (ramped up in the loop)
     fem_ids = [aid(n) for n in FEMURS]
     fem_jids = [jid(n) for n in FEMURS]                     # joint == actuator name; xanchor -> world pos
-    lifted_ids = [aid(n) for n in FEMURS if n.split("_")[1] in LIFTED_LEGS]
+    lifted_ids = [aid(f"femur{i}") for i, lab in enumerate(LEGS) if lab in LIFTED_LEGS]
     feet = [gid(n) for n in PLANTED_FEET]
 
     times, forces = deque(maxlen=6000), deque(maxlen=6000)   # ~2 min rolling buffer
@@ -129,7 +131,7 @@ def main():
         viewer.opt.flags[VF.mjVIS_CONTACTFORCE] = True
         viewer.opt.flags[VF.mjVIS_CONTACTSPLIT] = True   # split normal vs friction
 
-        print("standing on tripod " + " / ".join(PLANTED_FEET) +
+        print("standing on tripod " + " / ".join(LEGS[i] for i in PLANTED) +
               "; close the viewer (or Ctrl-C) to plot femur torques")
         step = 0
         try:
@@ -147,7 +149,7 @@ def main():
                 if step % 250 == 0:                          # ~ once per second
                     fz = [geom_force_world(m, d, g)[2] for g in feet]
                     print("planted Fz (N): " +
-                          "  ".join(f"{n}={v:5.2f}" for n, v in zip(PLANTED_FEET, fz)) +
+                          "  ".join(f"{LEGS[i]}={v:5.2f}" for i, v in zip(PLANTED, fz)) +
                           f"   sum={sum(fz):5.2f}")
                 dt = m.opt.timestep - (time.time() - t0)
                 if dt > 0:
