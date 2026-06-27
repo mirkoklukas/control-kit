@@ -55,3 +55,6 @@ class Cfg:
     normalize_observations: bool = True
     policy_hidden: tuple = (128, 128, 128)
     value_hidden: tuple = (256, 256)
+
+    # --- sample episodes (saved each eval: 1 deterministic + N stochastic, for replay/plots) ---
+    n_sample_episodes: int = 4   # stochastic episodes per eval (deterministic one always saved too)

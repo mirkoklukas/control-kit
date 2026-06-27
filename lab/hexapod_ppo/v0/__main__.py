@@ -34,8 +34,10 @@ from brax.training.agents.ppo import train as ppo # type: ignore
 
 from runkit import RunContext, experiment, main
 
+from lab.core.mjviz import plot_episodes
+
 from .config import Cfg
-from .env import HexapodEnv
+from .env import HexapodEnv, TERM_NAMES
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = ROOT / "models" / "hexapod.xml"
@@ -53,19 +55,20 @@ def _fmt_dur(seconds: float) -> str:
     return f"{sec}s"
 
 
-def _make_episode_sampler(env, make_policy, n_steps, seed):
-    """Build a jitted rollout: ``params -> (qpos, qvel)`` for an ``n_steps`` episode.
+def _make_episode_sampler(env, make_policy, n_steps, seed, n_stochastic):
+    """Build a jitted sampler: ``params -> (det, sto)`` rollouts of ``n_steps``.
 
-    Runs the *deterministic* policy from a fixed reset (same initial state every
-    call), so the saved episodes are directly comparable across evals. No
-    auto-reset: if the robot falls, the trajectory simply records it.
+    Returns one **deterministic** episode from a fixed reset (same initial state
+    every call, so it is comparable across evals) plus ``n_stochastic`` episodes
+    from the *sampling* policy with independent reset + action noise (so they show
+    the exploration spread). All run without auto-reset: a fall is just recorded.
+    Each rollout yields ``(qpos, qvel, done)`` stacked along the time axis; the
+    stochastic batch is ``vmap``-ed, so its leaves carry a leading ``[K]`` axis.
     """
-    key = jax.random.PRNGKey(seed)
+    base = jax.random.PRNGKey(seed)
 
-    @jax.jit
-    def sample(params):
-        policy = make_policy(params, deterministic=True)
-        state = env.reset(key)
+    def rollout(policy, reset_key, act_key):
+        state = env.reset(reset_key)
 
         def body(carry, _):
             st, k = carry
@@ -73,10 +76,24 @@ def _make_episode_sampler(env, make_policy, n_steps, seed):
             action, _ = policy(st.obs, ak)
             st = env.step(st, action)
             ps = st.pipeline_state
-            return (st, k), (ps.qpos, ps.qvel)
+            return (st, k), (ps.qpos, ps.qvel, st.done)
 
-        _, (qpos, qvel) = jax.lax.scan(body, (state, key), None, length=n_steps)
-        return qpos, qvel
+        _, out = jax.lax.scan(body, (state, act_key), None, length=n_steps)
+        return out
+
+    @jax.jit
+    def sample(params):
+        det_policy = make_policy(params, deterministic=True)
+        sto_policy = make_policy(params, deterministic=False)
+        det = rollout(det_policy, base, base)                  # fixed reset
+        keys = jax.random.split(jax.random.fold_in(base, 1), n_stochastic)
+
+        def one(k):
+            rk, ak = jax.random.split(k)
+            return rollout(sto_policy, rk, ak)
+
+        sto = jax.vmap(one)(keys)                              # leaves: [K, n, ...]
+        return det, sto
 
     return sample
 
@@ -128,27 +145,60 @@ def run(cfg: Cfg, ctx: RunContext):
             f"step={step:>11,}/{total_steps:,} ({pct:4.1f}%) {rate_s} eta {eta:>6} "
             f"reward={r:7.3f} +/- {std:.3f}"
         )
+        # Per-term reward breakdown (episode sums, averaged over eval envs); the
+        # terms add up to the total above. Shows e.g. whether lin_vel is paying off.
+        terms = " ".join(
+            f"{k}={float(metrics.get(f'eval/episode_reward/{k}', float('nan'))):+.2f}"
+            for k in TERM_NAMES
+        )
+        print(f"[hexapod_ppo]   terms: {terms}")
 
-    # Every eval, roll the current policy out for ~5 s and save a replayable
-    # state trajectory to results/ (same .npz layout the MPC `play` viewer reads).
-    # Built lazily on the first call, when brax hands us `make_policy`.
+    # Every eval, roll the current policy out for ~5 s and save replayable state
+    # trajectories to results/ (same .npz layout the MPC `play` viewer reads) plus
+    # a state plot. Files are indexed by eval counter (0,1,2,...), then sample idx:
+    # idx 0 is the deterministic episode, 1..K the stochastic ones. The sampler is
+    # built lazily on the first call, when brax hands us `make_policy`.
     n_sample_steps = max(1, round(5.0 / env.control_dt))
-    _sampler = []
+    z_min = cfg.z_min_frac * cfg.z_nominal
+    _sampler = []      # lazily-built sampler (closure over make_policy)
+    _eval = [0]        # progress-update counter -> filename index
 
     def save_sample_episode(step, make_policy, params):
         if not _sampler:
-            _sampler.append(
-                _make_episode_sampler(env, make_policy, n_sample_steps, cfg.seed))
-        qpos, qvel = _sampler[0](params)
+            _sampler.append(_make_episode_sampler(
+                env, make_policy, n_sample_steps, cfg.seed, cfg.n_sample_episodes))
+        det, sto = _sampler[0](params)
+        e = _eval[0]
+        _eval[0] += 1
+
+        # Each rollout is (qpos, qvel, done); idx 0 = deterministic, 1..K = the
+        # stochastic batch (peel off its leading [K] axis).
+        det = [np.asarray(a) for a in det]
+        sto = [np.asarray(a) for a in sto]
+        episodes = [(det[0], det[1], det[2], "deterministic")]
+        for i in range(sto[0].shape[0]):
+            episodes.append((sto[0][i], sto[1][i], sto[2][i], "stochastic"))
+
         results = ctx.out / "results"
         results.mkdir(parents=True, exist_ok=True)
-        np.savez(
-            results / f"sample_episode_{int(step)}.npz",
-            qpos=np.asarray(qpos), qvel=np.asarray(qvel),
-            timestep=env.control_dt, model=str(MODEL.relative_to(ROOT)),
-        )
-        print(f"[hexapod_ppo] sample episode @ step {int(step)} -> "
-              f"results/sample_episode_{int(step)}.npz")
+        for idx, (qpos, qvel, done, kind) in enumerate(episodes):
+            np.savez(
+                results / f"sample_episode_{e:03d}_{idx}.npz",
+                qpos=qpos, qvel=qvel, done=done,
+                timestep=env.control_dt, model=str(MODEL.relative_to(ROOT)),
+                step=int(step), kind=kind, cmd_vx=cfg.vx, z_min=z_min,
+            )
+        plot = results / f"sample_episodes_{e:03d}.png"
+        plot_episodes(
+            [(q, v, k) for q, v, _d, k in episodes], out=plot,
+            control_dt=env.control_dt, cmd_vx=cfg.vx, z_min=z_min, step=int(step))
+
+        print(f"[hexapod_ppo] eval {e:03d} @ step {int(step):,}: saved "
+              f"{len(episodes)} episodes (1 det + {len(episodes) - 1} stochastic) "
+              f"+ {plot.name}")
+        if int(step) == 0:
+            print("[hexapod_ppo] compiling training step (one-time, minutes) -- "
+                  "next progress line after the first epoch.")
 
     make_inference, params, _ = ppo.train(
         environment=env,
