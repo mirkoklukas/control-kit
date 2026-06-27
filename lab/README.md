@@ -33,6 +33,24 @@ is the runnable experiment, the dirs above it are namespaces that can also hold
 code shared within their subtree. New *directory* for new *code*; new *params*
 are just CLI overrides, not a new dir.
 
+## Pulling runs from the GPU box (`rsync`)
+
+Real runs happen on a remote CUDA box (MJX needs a GPU); the immutable run dirs
+land in `~/control-kit/runs/` there. Pull them down to inspect/replay locally.
+From the repo root (`lambda` is the SSH host alias):
+
+```bash
+# all runs (immutable + uniquely named, so this only fetches what's new)
+rsync -avz --progress lambda:control-kit/runs/ runs/
+
+# just one run
+rsync -avz --progress lambda:control-kit/runs/<run-dir>/ runs/<run-dir>/
+```
+
+Run dirs are never mutated after creation, so adding `--ignore-existing` lets a
+repeat pull skip everything already local without even checksumming it. Output
+stays in the gitignored `runs/`, ready for the replay step below.
+
 ## Replaying trajectories (`lab.core.mjviz`)
 
 Experiments that record a state trajectory (the MPC examples, the PPO sample

@@ -10,15 +10,24 @@ runkit experiment, saving the policy into the run dir.
 
 ## Run
 
-Everything needs the `ppo` extra (`brax` + the mjx stack):
+Everything needs the `ppo` extra (`brax` + the mjx stack). Real runs go on a GPU
+box; launch the baseline preset (see Presets) with the recommended env prefix:
 
 ```bash
-# full training (GPU box) -- cloud-shaped defaults in config.py
-uv run --extra ppo python -m lab.hexapod_ppo.v0 --tag=baseline
+TF_CPP_MIN_LOG_LEVEL=2 JAX_COMPILATION_CACHE_DIR=~/.cache/jax JAX_LOG_COMPILES=1 \
+  uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/baseline.yaml --tag=baseline
 
-# override any Cfg field as key=value; runkit meta-flags are --flags
-uv run --extra ppo python -m lab.hexapod_ppo.v0 vx=0.4 num_envs=2048 --tag=fast
+# layer Cfg overrides as key=value on top of the preset (same env prefix):
+#   ... exp:configs/baseline.yaml vx=0.4 --tag=fast
 ```
+
+The env prefix is recommended but optional (drop it and it still runs):
+- `TF_CPP_MIN_LOG_LEVEL=2` — hide XLA autotuning warnings.
+- `JAX_COMPILATION_CACHE_DIR=~/.cache/jax` — cache the compiled + autotuned
+  executable. The **first** run pays a several-minute MJX training-step compile
+  (XLA + GPU autotuning, *not* a hang — see Notes); this lets later same-config
+  runs skip it.
+- `JAX_LOG_COMPILES=1` — log each XLA compile: a heartbeat during the silent compile.
 
 MJX only flies on CUDA/TPU. CPU works but is slow, and the Apple GPU can't run MJX
 at all (see `docs/gotchas.md`), so real runs happen on a GPU box. Output lands in
@@ -44,6 +53,9 @@ uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/baseline.yaml vx=0.4
 
 Unlike CLI flags, YAML *can* set the tuple fields (`policy_hidden` / `value_hidden`):
 write them as lists.
+
+For real GPU runs, prefix these with the env vars shown under [Run](#run) (compile
+cache + quiet logs).
 
 ## Smoke test (local, proves wiring, won't learn)
 
@@ -121,3 +133,10 @@ _compat.py   shim: re-adds jax.device_put_replicated (removed in jax 0.10) for b
 - **Quieting startup noise:** the mjx Warp-probe prints are silenced by `warp-lang`
   (in the `mjx` extra); XLA GPU autotuning warnings can be hidden with
   `TF_CPP_MIN_LOG_LEVEL=2`.
+- **First run compiles for minutes.** After the `step=0` line there's a silent gap
+  (observed ~13 min on an A100) while XLA compiles the MJX training step and
+  autotunes GPU kernels — the GPU sits ~100% during autotuning, so it looks busy
+  but isn't stepping yet; it's *not* a hang. The next line lands once the first
+  epoch runs. Set `JAX_COMPILATION_CACHE_DIR` so same-config re-runs skip the
+  compile; `JAX_LOG_COMPILES=1` makes the gap visible. The `step=0` line is
+  followed by a one-off "compiling training step" hint to flag the wait.
