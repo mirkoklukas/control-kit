@@ -32,5 +32,18 @@ is one-time per box. If `/login` doesn't offer the subscription option, run `/lo
 ## Start bootstrapping
 
 ```
-cd ~/bootstrap-kit && claude --permission-mode bypassPermissions 'Read BOOTSTRAP.md and complete the bootstrap.'"
+cd ~/bootstrap-kit && claude --permission-mode bypassPermissions 'Read BOOTSTRAP.md and complete the bootstrap.'
 ```
+
+## Pull the results back
+
+The agent builds `bootstrap.sh` on the box (and writes `LOG.md` / `BLOCKERS.md`
+as it goes). When it's done, pull those back into the repo from your laptop:
+
+```bash
+./pull.sh <HOST>        # HOST = the same ssh alias / user@ip you used for prep.sh
+```
+
+`pull.sh` copies `bootstrap.sh`, `LOG.md`, and `BLOCKERS.md` from `~/bootstrap-kit`
+on the box over the local copies (missing ones are skipped). Review with
+`git diff` before committing.
