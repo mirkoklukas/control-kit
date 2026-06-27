@@ -18,7 +18,10 @@ Quick local smoke (tiny, just proves the pipeline wires up; won't learn):
         unroll_length=10 episode_length=100 num_evals=1
 """
 import functools
+import math
 import pickle
+import time
+from datetime import datetime
 from pathlib import Path
 
 import jax
@@ -36,6 +39,18 @@ from .env import HexapodEnv
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = ROOT / "models" / "hexapod.xml"
+
+
+def _fmt_dur(seconds: float) -> str:
+    """Compact h/m/s duration, e.g. '1h02m', '3m45s', '12s'."""
+    s = int(seconds)
+    h, rem = divmod(s, 3600)
+    m, sec = divmod(rem, 60)
+    if h:
+        return f"{h}h{m:02d}m"
+    if m:
+        return f"{m}m{sec:02d}s"
+    return f"{sec}s"
 
 
 def _make_episode_sampler(env, make_policy, n_steps, seed):
@@ -78,10 +93,41 @@ def run(cfg: Cfg, ctx: RunContext):
         value_hidden_layer_sizes=tuple(cfg.value_hidden),
     )
 
+    # Total env steps brax will actually run: it rounds the budget up to whole
+    # epochs (mirrors ppo.train's own accounting), so steps-left hits 0 at the end.
+    # action_repeat defaults to 1; these are control steps (one per env.step).
+    steps_per_train_step = cfg.batch_size * cfg.unroll_length * cfg.num_minibatches
+    epochs = max(cfg.num_evals - 1, 1)
+    total_steps = (
+        epochs
+        * math.ceil(cfg.num_timesteps / (epochs * steps_per_train_step))
+        * steps_per_train_step
+    )
+
+    clock = {}  # closure state: t0 (start) + last (time, step) for the interval rate
+
     def progress(step, metrics):
-        r = metrics.get("eval/episode_reward", float("nan"))
-        std = metrics.get("eval/episode_reward_std", float("nan"))
-        print(f"[hexapod_ppo] step={int(step):>11}  eval_reward={float(r):8.3f} +/- {float(std):.3f}")
+        now = time.monotonic()
+        step = int(step)
+        r = float(metrics.get("eval/episode_reward", float("nan")))
+        std = float(metrics.get("eval/episode_reward_std", float("nan")))
+
+        clock.setdefault("t0", now)
+        elapsed = now - clock["t0"]
+        rate = None  # env steps/s since the previous eval
+        if "t" in clock and now > clock["t"]:
+            rate = (step - clock["step"]) / (now - clock["t"])
+        clock["t"], clock["step"] = now, step
+
+        pct = 100.0 * step / total_steps
+        left = max(total_steps - step, 0)
+        rate_s = f"{rate / 1e3:6.1f}k/s" if rate else "      -- "
+        eta = _fmt_dur(left / rate) if rate else "--"
+        print(
+            f"[hexapod_ppo] {datetime.now():%H:%M:%S} +{_fmt_dur(elapsed):>6} "
+            f"step={step:>11,}/{total_steps:,} ({pct:4.1f}%) {rate_s} eta {eta:>6} "
+            f"reward={r:7.3f} +/- {std:.3f}"
+        )
 
     # Every eval, roll the current policy out for ~5 s and save a replayable
     # state trajectory to results/ (same .npz layout the MPC `play` viewer reads).
