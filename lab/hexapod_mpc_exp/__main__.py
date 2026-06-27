@@ -148,25 +148,9 @@ def play(
     file: Annotated[Path, typer.Argument(help="saved .npz trajectory to replay")],
 ) -> None:
     """Replay a saved trajectory in the passive viewer (local; needs mjpython on macOS)."""
-    from mujoco import viewer as mj_viewer
+    from lab.core.mjviz import play as play_npz
 
-    npz = np.load(file)
-    qpos, qvel, dt = npz["qpos"], npz["qvel"], float(npz["timestep"])
-    print(f"loaded {len(qpos)} frames from {file} (dt={dt}s)")
-
-    mj_model = mujoco.MjModel.from_xml_path(str(MODEL))
-    data = mujoco.MjData(mj_model)
-    with mj_viewer.launch_passive(mj_model, data) as viewer:
-        while viewer.is_running():
-            for q, v in zip(qpos, qvel):
-                if not viewer.is_running():
-                    break
-                data.qpos[:] = q
-                data.qvel[:] = v
-                mujoco.mj_forward(mj_model, data)   # reconstruct poses for rendering
-                viewer.sync()
-                time.sleep(dt)                       # real-time pacing
-            time.sleep(0.5)                          # pause, then loop the replay
+    play_npz(file)
 
 
 if __name__ == "__main__":

@@ -21,11 +21,13 @@ import functools
 import pickle
 from pathlib import Path
 
+import jax
 import mujoco
+import numpy as np
 
 from . import _compat  # noqa: F401  -- patches jax.device_put_replicated for brax 0.14
-from brax.training.agents.ppo import networks as ppo_networks
-from brax.training.agents.ppo import train as ppo
+from brax.training.agents.ppo import networks as ppo_networks # type: ignore
+from brax.training.agents.ppo import train as ppo # type: ignore
 
 from runkit import RunContext, experiment, main
 
@@ -34,6 +36,34 @@ from .env import HexapodEnv
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = ROOT / "models" / "hexapod.xml"
+
+
+def _make_episode_sampler(env, make_policy, n_steps, seed):
+    """Build a jitted rollout: ``params -> (qpos, qvel)`` for an ``n_steps`` episode.
+
+    Runs the *deterministic* policy from a fixed reset (same initial state every
+    call), so the saved episodes are directly comparable across evals. No
+    auto-reset: if the robot falls, the trajectory simply records it.
+    """
+    key = jax.random.PRNGKey(seed)
+
+    @jax.jit
+    def sample(params):
+        policy = make_policy(params, deterministic=True)
+        state = env.reset(key)
+
+        def body(carry, _):
+            st, k = carry
+            k, ak = jax.random.split(k)
+            action, _ = policy(st.obs, ak)
+            st = env.step(st, action)
+            ps = st.pipeline_state
+            return (st, k), (ps.qpos, ps.qvel)
+
+        _, (qpos, qvel) = jax.lax.scan(body, (state, key), None, length=n_steps)
+        return qpos, qvel
+
+    return sample
 
 
 @experiment(name="hexapod_ppo")
@@ -52,6 +82,27 @@ def run(cfg: Cfg, ctx: RunContext):
         r = metrics.get("eval/episode_reward", float("nan"))
         std = metrics.get("eval/episode_reward_std", float("nan"))
         print(f"[hexapod_ppo] step={int(step):>11}  eval_reward={float(r):8.3f} +/- {float(std):.3f}")
+
+    # Every eval, roll the current policy out for ~5 s and save a replayable
+    # state trajectory to results/ (same .npz layout the MPC `play` viewer reads).
+    # Built lazily on the first call, when brax hands us `make_policy`.
+    n_sample_steps = max(1, round(5.0 / env.control_dt))
+    _sampler = []
+
+    def save_sample_episode(step, make_policy, params):
+        if not _sampler:
+            _sampler.append(
+                _make_episode_sampler(env, make_policy, n_sample_steps, cfg.seed))
+        qpos, qvel = _sampler[0](params)
+        results = ctx.out / "results"
+        results.mkdir(parents=True, exist_ok=True)
+        np.savez(
+            results / f"sample_episode_{int(step)}.npz",
+            qpos=np.asarray(qpos), qvel=np.asarray(qvel),
+            timestep=env.control_dt, model=str(MODEL.relative_to(ROOT)),
+        )
+        print(f"[hexapod_ppo] sample episode @ step {int(step)} -> "
+              f"results/sample_episode_{int(step)}.npz")
 
     make_inference, params, _ = ppo.train(
         environment=env,
@@ -74,6 +125,7 @@ def run(cfg: Cfg, ctx: RunContext):
         network_factory=network_factory,
         seed=cfg.seed,
         progress_fn=progress,
+        policy_params_fn=save_sample_episode,
     )
 
     # Persist params (normalizer + policy) for later eval/replay.

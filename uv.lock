@@ -2643,8 +2643,8 @@ dependencies = [
 requires-dist = [
     { name = "ipython", marker = "extra == 'dev'" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "pytest", marker = "extra == 'dev'", specifier = ">=8" },
     { name = "pyyaml", specifier = ">=6" },
-    { name = "ruff", marker = "extra == 'dev'" },
     { name = "typer", specifier = ">=0.26.7" },
 ]
 provides-extras = ["dev"]

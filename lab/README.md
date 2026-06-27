@@ -33,6 +33,18 @@ is the runnable experiment, the dirs above it are namespaces that can also hold
 code shared within their subtree. New *directory* for new *code*; new *params*
 are just CLI overrides, not a new dir.
 
+## Replaying trajectories (`lab.core.mjviz`)
+
+Experiments that record a state trajectory (the MPC examples, the PPO sample
+episodes) save it as an `.npz` carrying `qpos`/`qvel`/`timestep`/`model`. Replay
+any of them in the MuJoCo passive viewer (local only; needs `mjpython` on macOS):
+
+```bash
+uv run mjpython -m lab.hexapod_mpc_exp play <run>/results/sample_episode_<step>.npz
+# or directly:
+uv run mjpython -c "from lab.core.mjviz import play; play('<run>/results/sample_episode_0.npz')"
+```
+
 ## Relationship to runkit
 
 `lab` and `runkit` are two halves of the same activity: `lab` is *what* to run,
@@ -41,5 +53,5 @@ dirs, captured provenance). An experiment plugs into the harness via runkit's
 `@experiment` decorator; outputs land in a gitignored `runs/` (ignored at any
 depth, including `lab/<experiment>/runs/`).
 
-The two are deliberately close-coupled and may get bundled together down the
-line — open question for now (see `src/runkit/design.md`).
+`runkit` has since moved into its own repo (`../run-kit`, consumed here as an
+editable path dependency); see its `design.md` for the run-spec model and roadmap.

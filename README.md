@@ -15,7 +15,8 @@ fine for development, just slow).
 uv sync --extra mjx
 
 # Linux + NVIDIA GPU
-uv sync --extra mjx --extra gpu
+uv sync --extra gpu --extra ppo
+uv sync --extra gpu --extra mjx
 ```
 
 `uv sync` creates `.venv` and installs everything. `.venv` is per-machine

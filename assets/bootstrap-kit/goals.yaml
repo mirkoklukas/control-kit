@@ -17,9 +17,10 @@ tasks:
   - name: run-kit
     type: repo
     do:   install https://github.com/mirkoklukas/run-kit
-    pass: uv run python examples/01_mpc_cartpole.py record
+    pass: uv run --extra dev pytest
     
   - name: control-kit
     type: repo
     do:   install https://github.com/mirkoklukas/control-kit
-    pass: uv run python examples/01_mpc_cartpole.py record
+    note: Needs to have the same parent folder as `run-kit`.
+    pass: uv run --extra ppo python -m lab.hexapod_ppo.v0.smoke ; echo "exit=$?"
