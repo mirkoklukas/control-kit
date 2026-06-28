@@ -28,3 +28,6 @@ function a `ctx` reconstructed from that dir.
 - Open Qs: what does a read-only ctx expose / forbid (writes? `ctx.out`?); does
   `viz` get the frozen config back out of the run dir automatically.
 
+## runkit experiment decorator
+- set config default yaml.
+- counter labels for run dirs. 

@@ -349,10 +349,19 @@ ppo = [
     { name = "mujoco-mjx" },
     { name = "warp-lang" },
 ]
+vm = [
+    { name = "brax", version = "0.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
+    { name = "brax", version = "0.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
+    { name = "jax", version = "0.6.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version < '3.11' and sys_platform == 'linux'" },
+    { name = "jax", version = "0.10.2", source = { registry = "https://pypi.org/simple" }, extra = ["cuda12"], marker = "python_full_version >= '3.11' and sys_platform == 'linux'" },
+    { name = "mujoco-mjx" },
+    { name = "warp-lang" },
+]
 
 [package.metadata]
 requires-dist = [
     { name = "brax", marker = "extra == 'ppo'", specifier = ">=0.10" },
+    { name = "controlkit", extras = ["gpu", "ppo"], marker = "extra == 'vm'" },
     { name = "controlkit", extras = ["mjx"], marker = "extra == 'ppo'" },
     { name = "gymnasium", extras = ["mujoco"], specifier = ">=0.29" },
     { name = "ipython", marker = "extra == 'dev'" },
@@ -369,7 +378,7 @@ requires-dist = [
     { name = "typer", specifier = ">=0.26.7" },
     { name = "warp-lang", marker = "extra == 'mjx'" },
 ]
-provides-extras = ["dev", "mjx", "ppo", "gpu"]
+provides-extras = ["dev", "mjx", "ppo", "gpu", "vm"]
 
 [[package]]
 name = "cuda-bindings"

@@ -8,6 +8,8 @@ camera/resolution.
 
 Local only: needs a display, and on macOS the passive viewer requires `mjpython`.
 """
+import os
+import sys
 import time
 from pathlib import Path
 
@@ -38,6 +40,18 @@ def play(file, model=None, loop=True):
     paused), up/down = slower/faster. The viewer's time readout tracks the frame.
     """
     from mujoco import viewer as mj_viewer
+
+    # macOS passive viewer must run under `mjpython`; relaunch ourselves if needed.
+    if sys.platform == "darwin" and getattr(mj_viewer, "_MJPYTHON", None) is None:
+        mjpython = Path(sys.executable).with_name("mjpython")
+        if not mjpython.exists():
+            raise typer.BadParameter(
+                "on macOS the viewer needs `mjpython`, which was not found next to "
+                f"{sys.executable}. Install mujoco's viewer extra, or run "
+                "`uv run mjpython -m controlkit.viz play ...`."
+            )
+        print(f"relaunching under mjpython for the macOS viewer: {mjpython}", flush=True)
+        os.execv(str(mjpython), [str(mjpython), *sys.argv])
 
     file = Path(file)
     npz = np.load(file)
