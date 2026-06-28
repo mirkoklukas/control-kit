@@ -12,6 +12,8 @@ so it is closed over rather than carried -- which also sidesteps Brax's default
 AutoResetWrapper not resetting ``info`` (only ``foot_state``/``last_action`` go
 stale for a single step after an auto-reset, a negligible transient).
 """
+import dataclasses
+
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -46,7 +48,13 @@ class HexapodEnv(Env):
         self.cfg = cfg
         self._mjx = mjx.put_model(mj_model)
         self.ids = HexapodIds(mj_model)
-        self.weights = cfg.reward_weights
+        # Coerce weights to float: YAML loads bare exponents like "1e-4" (no dot)
+        # as strings, which would blow up deep in the reward as str*array.
+        self.weights = dataclasses.replace(
+            cfg.reward_weights,
+            **{f.name: float(getattr(cfg.reward_weights, f.name))
+               for f in dataclasses.fields(cfg.reward_weights)},
+        )
         self.command = Command.straight(cfg.vx)  # fixed forward command
         self.sim_dt = float(mj_model.opt.timestep)
         self.control_dt = self.sim_dt * cfg.decimation
