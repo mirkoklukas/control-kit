@@ -18,6 +18,7 @@ import mujoco
 from brax.envs.base import Env, State
 from mujoco import mjx
 
+from controlkit.mjx.utils import keyframe
 from controlkit.reward import (
     Command,
     FootState,
@@ -56,8 +57,17 @@ class HexapodEnv(Env):
         self._ctrl_lo = jnp.asarray(mj_model.jnt_range[jid, 0])
         self._ctrl_hi = jnp.asarray(mj_model.jnt_range[jid, 1])
         self._nu = int(mj_model.nu)
-        self._qpos0 = jnp.asarray(mj_model.qpos0)
         self._feet = jnp.asarray(self.ids.feet())
+
+        # Stance pose from the <keyframe name="home">: the env resets here, and
+        # actions are commanded as offsets around it (see step). Falls back to
+        # qpos0 if the model has no such keyframe.
+        try:
+            self._home_qpos, self._home_qvel = keyframe(mj_model, "home")
+        except KeyError:
+            self._home_qpos = jnp.asarray(mj_model.qpos0)
+            self._home_qvel = jnp.zeros(int(mj_model.nv))
+        self._rest = self._home_qpos[7:]  # per-joint stance angles (action center)
 
         # observation size (host-side, once).
         d = mjx.forward(self._mjx, mjx.make_data(self._mjx))
@@ -83,10 +93,13 @@ class HexapodEnv(Env):
     def reset(self, rng: jax.Array) -> State:
         rng, key = jax.random.split(rng)
         n = self.cfg.reset_joint_noise
-        qpos = self._qpos0.at[7:].add(
+        qpos = self._home_qpos.at[7:].add(
             jax.random.uniform(key, (self._nu,), minval=-n, maxval=n)
         )
-        data = mjx.forward(self._mjx, mjx.make_data(self._mjx).replace(qpos=qpos))
+        data = mjx.forward(
+            self._mjx,
+            mjx.make_data(self._mjx).replace(qpos=qpos, qvel=self._home_qvel),
+        )
 
         # seed last_contact from the actual stance (avoids a spurious step-0 touchdown).
         contact = foot_contacts(data, self._feet, self.cfg.contact_force_thresh)
@@ -99,7 +112,11 @@ class HexapodEnv(Env):
         return State(data, obs, jnp.zeros(()), jnp.zeros(()), metrics, info)
 
     def step(self, state: State, action: jax.Array) -> State:
-        ctrl = jnp.clip(self.cfg.action_scale * action, self._ctrl_lo, self._ctrl_hi)
+        # Actions are offsets around the stance pose, so a zero/neutral action
+        # holds the home keyframe instead of driving the joints to 0 (legs flat).
+        ctrl = jnp.clip(
+            self._rest + self.cfg.action_scale * action, self._ctrl_lo, self._ctrl_hi
+        )
 
         def sim(d, _):
             return mjx.step(self._mjx, d.replace(ctrl=ctrl)), None

@@ -1,11 +1,44 @@
 # Tiny local wiring check: compiles & runs end-to-end, won't learn. CPU ~1-2 min.
-#   uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/smoke.yaml --tag=smoke
+# Complete config (every Cfg field) -- self-contained, independent of config.py defaults.
+#   uv run --extra vm python -m lab.hexapod_ppo.v0.run exp:configs/smoke.yaml --tag=smoke
+
+# --- task ---
+vx: 0.3                     # commanded forward speed (m/s)
+
+# --- control / sim ---
+decimation: 10             # sim steps per control step (0.04 s control dt)
+action_scale: 0.5          # ctrl = clip(action_scale * action, joint range) [rad]
+episode_length: 60         # short episodes (vs 100) -- just exercising the loop
+reset_joint_noise: 0.05    # uniform rad noise on initial joint angles
+
+# --- reward ---
+air_time_target: 0.4
+contact_force_thresh: 1.0
+
+# --- termination ---
+z_nominal: 0.20            # standing trunk height (m)
+z_min_frac: 0.5            # done if trunk z < z_min_frac * z_nominal
+up_min: 0.5                # done if base up . world up < up_min (tilt > 60 deg)
+
+# --- PPO (brax) -- all tiny so it wires up fast, not to learn ---
+seed: 0
+num_timesteps: 16384       # tiny budget
 num_envs: 32
-num_timesteps: 16384
 num_eval_envs: 32
-num_evals: 2
+num_evals: 2               # >=2 so the eval / sample-episode callback fires
 batch_size: 32
 num_minibatches: 2
 num_updates_per_batch: 1
 unroll_length: 10
-episode_length: 60
+learning_rate: 0.0003
+entropy_cost: 0.01
+discounting: 0.97
+gae_lambda: 0.95
+clipping_epsilon: 0.2
+reward_scaling: 1.0
+normalize_observations: true
+policy_hidden: [128, 128, 128]
+value_hidden: [256, 256]
+
+# --- sample episodes (saved each eval) ---
+n_sample_episodes: 4

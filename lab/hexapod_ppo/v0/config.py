@@ -3,7 +3,11 @@
 A leaf module so both run.py (the runner) and env.py (the Brax ``Env``) can
 import ``Cfg`` without a circular import (env wraps Cfg; run imports env).
 """
+import dataclasses
 from dataclasses import dataclass
+from pathlib import Path
+
+import yaml
 
 
 @dataclass
@@ -58,3 +62,33 @@ class Cfg:
 
     # --- sample episodes (saved each eval: 1 deterministic + N stochastic, for replay/plots) ---
     n_sample_episodes: int = 4   # stochastic episodes per eval (deterministic one always saved too)
+
+    def save(self, path) -> None:
+        """Write every field to a YAML file at `path` (complete + self-contained).
+
+        Tuples are written as lists so the YAML round-trips cleanly. The output
+        is independent of these defaults -- loading it later reproduces this Cfg
+        regardless of how config.py changes.
+        """
+        data = {
+            f.name: (list(v) if isinstance(v := getattr(self, f.name), tuple) else v)
+            for f in dataclasses.fields(self)
+        }
+        Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
+
+    @classmethod
+    def load(cls, path) -> "Cfg":
+        """Build a Cfg from a YAML file at `path` (plain path, no scheme prefixes).
+
+        Unknown keys are rejected; tuple-typed fields accept YAML lists. Any field
+        absent from the file falls back to its default here.
+        """
+        data = yaml.safe_load(Path(path).read_text()) or {}
+        types = {f.name: f.type for f in dataclasses.fields(cls)}
+        unknown = set(data) - set(types)
+        if unknown:
+            raise ValueError(f"unknown Cfg field(s) in {path}: {sorted(unknown)}")
+        for k, v in data.items():
+            if types[k] in (tuple, "tuple") and isinstance(v, list):
+                data[k] = tuple(v)
+        return cls(**data)
