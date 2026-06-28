@@ -6,6 +6,12 @@
       "runtimeExecutable": ".venv/bin/python",
       "runtimeArgs": ["tools/model_viz/serve.py", "--no-open"],
       "port": 8000
+    },
+    {
+      "name": "model-generator",
+      "runtimeExecutable": ".venv/bin/python",
+      "runtimeArgs": ["tools/model_generator/serve.py", "--no-open"],
+      "port": 8001
     }
   ]
 }
