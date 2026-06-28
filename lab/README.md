@@ -16,7 +16,7 @@ A helper that outgrows a single experiment moves into `controlkit`. The
 dependency only ever points one way: experiments import from `controlkit`,
 never the reverse.
 
-## Shape of an experiment
+## Shape of an experiment (Recommended, not enforced)
 
 Each experiment is a subpackage, launched from the CLI:
 
@@ -24,7 +24,7 @@ Each experiment is a subpackage, launched from the CLI:
 lab/<experiment>/
   config.py     # the knobs (a dataclass) — the "what"
   env.py        # system-specific wiring
-  __main__.py   # the entry point  →  python -m lab.<experiment>
+  run.py        # the experiment body + launcher  →  python -m lab.<experiment>.run
 ```
 
 Nesting is fine for grouping or versioning (e.g. `lab/mpc/hexapod/v0`): the leaf

@@ -15,7 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from .__main__ import Cfg, run
+from .run import Cfg, run
 
 # Tiny config: enough to exercise env + ppo.train + the sample-episode callback,
 # not enough to learn anything. num_evals=2 guarantees the callback fires.

@@ -7,9 +7,9 @@ body a RunContext, freezes the config, and dumps a non-None return value. The
 anywhere (no jax / MuJoCo).
 
 Run:
-    uv run python -m lab.mock_exp seed=7 num_steps=500000 --tag=baseline
+    uv run python -m lab.mock_exp.run seed=7 num_steps=500000 --tag=baseline
     # equivalently, via the runkit console script:
-    uv run runkit run lab/mock_exp/__main__.py seed=7 --tag=baseline
+    uv run runkit run lab/mock_exp/run.py seed=7 --tag=baseline
 
 Everything written under ctx.out lands in the run dir below ./runs (gitignored).
 Useful flags: --dry-run (resolve + print cfg, no run dir), --tag=LABEL,

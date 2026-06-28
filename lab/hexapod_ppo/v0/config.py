@@ -1,7 +1,7 @@
 """Config for hexapod_ppo v0.
 
-A leaf module so both __main__.py (the runner) and env.py (the Brax ``Env``) can
-import ``Cfg`` without a circular import (env wraps Cfg; __main__ imports env).
+A leaf module so both run.py (the runner) and env.py (the Brax ``Env``) can
+import ``Cfg`` without a circular import (env wraps Cfg; run imports env).
 """
 from dataclasses import dataclass
 
@@ -13,7 +13,7 @@ class Cfg:
     runkit builds this from CLI key=value tokens (introspecting the ``cfg: Cfg``
     annotation on ``run``), so any field is overridable, e.g.::
 
-        uv run --extra ppo python -m lab.hexapod_ppo.v0 num_envs=2048 vx=0.4 --tag=fast
+        uv run --extra ppo python -m lab.hexapod_ppo.v0.run num_envs=2048 vx=0.4 --tag=fast
 
     The PPO defaults are GPU/cloud-shaped; for a quick local smoke pass tiny values
     (see smoke.py). Sim dt = 0.004 s.

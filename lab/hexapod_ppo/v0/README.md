@@ -5,7 +5,7 @@ Train the radial hexapod to **walk straight in +x** with PPO (Brax on MJX).
 The reward, ids, command, and kinematics all live in the stable core
 (`controlkit.reward`, see `docs/hexapod-rewards.md`). This experiment only
 glues them to training: `env.py` wraps the MJX dynamics + `compute_reward_2` into
-a Brax `Env`, and `__main__.py` runs `brax.training.agents.ppo` as a tracked
+a Brax `Env`, and `run.py` runs `brax.training.agents.ppo` as a tracked
 runkit experiment, saving the policy into the run dir.
 
 ## Run
@@ -15,7 +15,7 @@ box; launch the baseline preset (see Presets) with the recommended env prefix:
 
 ```bash
 TF_CPP_MIN_LOG_LEVEL=2 JAX_COMPILATION_CACHE_DIR=~/.cache/jax JAX_LOG_COMPILES=1 \
-  uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/baseline.yaml --tag=baseline
+  uv run --extra ppo python -m lab.hexapod_ppo.v0.run exp:configs/baseline.yaml --tag=baseline
 
 # layer Cfg overrides as key=value on top of the preset (same env prefix):
 #   ... exp:configs/baseline.yaml vx=0.4 --tag=fast
@@ -41,8 +41,8 @@ prefix (relative to this folder, so cwd doesn't matter) and layers them over the
 ad-hoc overrides:
 
 ```bash
-uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/baseline.yaml --tag=baseline
-uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/baseline.yaml vx=0.4 --tag=fast   # override on top
+uv run --extra ppo python -m lab.hexapod_ppo.v0.run exp:configs/baseline.yaml --tag=baseline
+uv run --extra ppo python -m lab.hexapod_ppo.v0.run exp:configs/baseline.yaml vx=0.4 --tag=fast   # override on top
 ```
 
 - **`baseline.yaml`** — the main A100-40GB run (50M steps), `num_evals=40` so progress
@@ -62,7 +62,7 @@ cache + quiet logs).
 Tiny settings so it compiles and runs a couple of PPO iterations end-to-end:
 
 ```bash
-uv run --extra ppo python -m lab.hexapod_ppo.v0 exp:configs/smoke.yaml --tag=smoke
+uv run --extra ppo python -m lab.hexapod_ppo.v0.run exp:configs/smoke.yaml --tag=smoke
 ```
 
 You should see two `eval_reward` lines print and a `policy.pkl` get saved. It runs
@@ -117,14 +117,14 @@ config.py    Cfg -- all knobs (task, control, termination, PPO)
 configs/     named run presets (baseline / throughput / smoke), loaded as exp:configs/<name>.yaml
 env.py       HexapodEnv (Brax Env): action->ctrl, MJX step x decimation,
              compute_reward_2, 66-dim obs, foot_state/last_action via State.info
-__main__.py  @experiment("hexapod_ppo"): build env -> brax PPO -> save policy.pkl
+run.py       @experiment("hexapod_ppo"): build env -> brax PPO -> save policy.pkl
 _compat.py   shim: re-adds jax.device_put_replicated (removed in jax 0.10) for brax 0.14
 ```
 
 ## Notes / gotchas
 
 - **`_compat.py` is required.** brax 0.14 calls `jax.device_put_replicated`, which
-  jax 0.10 removed; the shim re-adds it. `__main__.py` imports it before brax.
+  jax 0.10 removed; the shim re-adds it. `run.py` imports it before brax.
 - **Env reset** seeds `FootState.last_contact` from the current stance, so feet
   don't register a spurious touchdown on step 0.
 - **Command is fixed** (`Command.straight(vx)`), closed over in the env. To train a

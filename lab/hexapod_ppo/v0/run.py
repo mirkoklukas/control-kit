@@ -8,12 +8,12 @@ MJX only flies on CUDA/TPU (CPU works but is slow; the Apple GPU can't run MJX -
 see docs/gotchas.md), so the real run happens on a GPU box. The cloud-shaped
 defaults live in config.py; override per run on the CLI:
 
-    uv run --extra ppo python -m lab.hexapod_ppo.v0 --tag=baseline
-    uv run --extra ppo python -m lab.hexapod_ppo.v0 vx=0.4 num_envs=2048 --tag=slow
+    uv run --extra ppo python -m lab.hexapod_ppo.v0.run --tag=baseline
+    uv run --extra ppo python -m lab.hexapod_ppo.v0.run vx=0.4 num_envs=2048 --tag=slow
 
 Quick local smoke (tiny, just proves the pipeline wires up; won't learn):
 
-    uv run --extra ppo python -m lab.hexapod_ppo.v0 \
+    uv run --extra ppo python -m lab.hexapod_ppo.v0.run \
         num_envs=8 num_timesteps=4096 batch_size=8 num_minibatches=2 \
         unroll_length=10 episode_length=100 num_evals=1
 """
