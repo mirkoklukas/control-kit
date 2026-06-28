@@ -38,3 +38,6 @@ function a `ctx` reconstructed from that dir.
 
 ## Model generator
 - reset camera pose button. 
+
+## Configs
+- maybe add type checks. should use pydantic or whatever?
