@@ -12,10 +12,12 @@ import typer
 
 from controlkit.modelgen import app as modelgen_app
 from controlkit.viz import app as viz_app
+from controlkit.viz import play as _play
 
 _ROOT = Path(__file__).resolve().parents[2]  # src/controlkit/cli.py -> repo root
 
 app = typer.Typer(add_completion=False, no_args_is_help=True, help="controlkit CLI.")
+app.command("play")(_play)
 app.add_typer(viz_app, name="viz")
 app.add_typer(modelgen_app, name="model-gen")
 

@@ -55,7 +55,13 @@ def main() -> int:
         check("sample episode recorded", episodes)
         if episodes:
             npz = np.load(episodes[0])
-            check("episode has frames", npz["qpos"].shape[0] > 0 and npz["qvel"].shape[0] > 0)
+            n = npz["qpos"].shape[0]
+            check("episode has frames", n > 0 and npz["qvel"].shape[0] > 0)
+            check("reward recorded", npz["reward"].shape == (n,))
+            check(
+                "per-term reward recorded",
+                npz["reward_terms"].shape == (n, len(npz["term_names"])),
+            )
 
     ok = all(passed for _, passed in checks)
     for name, passed in checks:

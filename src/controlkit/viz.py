@@ -22,13 +22,16 @@ _ROOT = Path(__file__).resolve().parents[2]   # src/controlkit/viz.py -> repo ro
 
 app = typer.Typer(
     add_completion=False, no_args_is_help=True,
-    help="Replay (play) or plot a saved npz state trajectory. The viewer is local "
-         "only: needs a display, and on macOS requires `mjpython`; the plot is "
-         "headless-safe. Example: uv run mjpython -m controlkit.viz play runs/hexapod.npz",
+    help="Plot a saved npz state trajectory (headless-safe). Replay lives at the "
+         "top level: `ctk play <file>`.",
 )
 
-@app.command()
-def play(file, model=None, loop=True):
+
+def play(
+    file: str,
+    model: str = typer.Option(None, help="MJCF path; default taken from the npz."),
+    loop: bool = typer.Option(True, help="Restart playback when it reaches the end."),
+):
     """Replay an .npz trajectory (qpos/qvel/timestep, optional model) in the passive viewer.
 
     file:  path to the saved trajectory.

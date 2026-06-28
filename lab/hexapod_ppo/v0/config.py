@@ -9,6 +9,8 @@ from pathlib import Path
 
 import yaml
 
+from controlkit.reward import RewardWeights
+
 
 @dataclass
 class Cfg:
@@ -31,9 +33,14 @@ class Cfg:
     episode_length: int = 100    # max control steps before the episode truncates/resets
     reset_joint_noise: float = 0.05   # uniform rad noise on initial joint angles
 
-    # --- reward (the rest default in controlkit RewardWeights) ---
+    # --- reward ---
     air_time_target: float = 0.4
     contact_force_thresh: float = 1.0
+
+    # Per-term weights (controlkit.reward.RewardWeights; the sign carries the
+    # penalty direction). Nested, so override any term from the CLI, e.g.
+    # reward_weights.torques=0 to ablate the torque penalty. env.py uses this directly.
+    reward_weights: RewardWeights = dataclasses.field(default_factory=RewardWeights)
 
     # --- termination ---
     # z_nominal (standing trunk height) is NOT here: it's model-dependent, derived
@@ -67,22 +74,26 @@ class Cfg:
     def save(self, path) -> None:
         """Write every field to a YAML file at `path` (complete + self-contained).
 
-        Tuples are written as lists so the YAML round-trips cleanly. The output
-        is independent of these defaults -- loading it later reproduces this Cfg
-        regardless of how config.py changes.
+        Tuples are written as lists and nested dataclasses (reward_weights) as
+        plain dicts so the YAML round-trips cleanly. The output is independent of
+        these defaults -- loading it later reproduces this Cfg regardless of how
+        config.py changes.
         """
-        data = {
-            f.name: (list(v) if isinstance(v := getattr(self, f.name), tuple) else v)
-            for f in dataclasses.fields(self)
-        }
+        def _ser(v):
+            if dataclasses.is_dataclass(v):
+                return dataclasses.asdict(v)
+            return list(v) if isinstance(v, tuple) else v
+
+        data = {f.name: _ser(getattr(self, f.name)) for f in dataclasses.fields(self)}
         Path(path).write_text(yaml.safe_dump(data, sort_keys=False))
 
     @classmethod
     def load(cls, path) -> "Cfg":
         """Build a Cfg from a YAML file at `path` (plain path, no scheme prefixes).
 
-        Unknown keys are rejected; tuple-typed fields accept YAML lists. Any field
-        absent from the file falls back to its default here.
+        Unknown keys are rejected; tuple-typed fields accept YAML lists and nested
+        dataclass fields (reward_weights) accept YAML dicts. Any field absent from
+        the file falls back to its default here.
         """
         data = yaml.safe_load(Path(path).read_text()) or {}
         types = {f.name: f.type for f in dataclasses.fields(cls)}
@@ -90,6 +101,9 @@ class Cfg:
         if unknown:
             raise ValueError(f"unknown Cfg field(s) in {path}: {sorted(unknown)}")
         for k, v in data.items():
-            if types[k] in (tuple, "tuple") and isinstance(v, list):
+            t = types[k]
+            if dataclasses.is_dataclass(t) and isinstance(v, dict):
+                data[k] = t(**v)
+            elif t in (tuple, "tuple") and isinstance(v, list):
                 data[k] = tuple(v)
         return cls(**data)

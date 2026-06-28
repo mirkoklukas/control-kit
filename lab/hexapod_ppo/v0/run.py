@@ -25,6 +25,7 @@ from datetime import datetime
 from pathlib import Path
 
 import jax
+import jax.numpy as jnp
 import mujoco
 import numpy as np
 
@@ -62,8 +63,10 @@ def _make_episode_sampler(env, make_policy, n_steps, seed, n_stochastic):
     every call, so it is comparable across evals) plus ``n_stochastic`` episodes
     from the *sampling* policy with independent reset + action noise (so they show
     the exploration spread). All run without auto-reset: a fall is just recorded.
-    Each rollout yields ``(qpos, qvel, done)`` stacked along the time axis; the
-    stochastic batch is ``vmap``-ed, so its leaves carry a leading ``[K]`` axis.
+    Each rollout yields ``(qpos, qvel, done, reward, terms)`` stacked along the
+    time axis (``terms`` is ``[n, len(TERM_NAMES)]``, the weighted per-term
+    contributions that sum to ``reward``); the stochastic batch is ``vmap``-ed, so
+    its leaves carry a leading ``[K]`` axis.
     """
     base = jax.random.PRNGKey(seed)
 
@@ -76,7 +79,8 @@ def _make_episode_sampler(env, make_policy, n_steps, seed, n_stochastic):
             action, _ = policy(st.obs, ak)
             st = env.step(st, action)
             ps = st.pipeline_state
-            return (st, k), (ps.qpos, ps.qvel, st.done)
+            terms = jnp.stack([st.metrics[f"reward/{k}"] for k in TERM_NAMES])
+            return (st, k), (ps.qpos, ps.qvel, st.done, st.reward, terms)
 
         _, out = jax.lax.scan(body, (state, act_key), None, length=n_steps)
         return out
@@ -171,26 +175,28 @@ def run(cfg: Cfg, ctx: RunContext):
         e = _eval[0]
         _eval[0] += 1
 
-        # Each rollout is (qpos, qvel, done); idx 0 = deterministic, 1..K = the
-        # stochastic batch (peel off its leading [K] axis).
+        # Each rollout is (qpos, qvel, done, reward, terms); idx 0 = deterministic,
+        # 1..K = the stochastic batch (peel off its leading [K] axis). `terms` is
+        # [n, len(TERM_NAMES)], the weighted per-term contributions summing to reward.
         det = [np.asarray(a) for a in det]
         sto = [np.asarray(a) for a in sto]
-        episodes = [(det[0], det[1], det[2], "deterministic")]
+        episodes = [(*[a for a in det], "deterministic")]
         for i in range(sto[0].shape[0]):
-            episodes.append((sto[0][i], sto[1][i], sto[2][i], "stochastic"))
+            episodes.append((*[a[i] for a in sto], "stochastic"))
 
         results = ctx.out / "results"
         results.mkdir(parents=True, exist_ok=True)
-        for idx, (qpos, qvel, done, kind) in enumerate(episodes):
+        for idx, (qpos, qvel, done, reward, terms, kind) in enumerate(episodes):
             np.savez(
                 results / f"sample_episode_{e:03d}_{idx}.npz",
                 qpos=qpos, qvel=qvel, done=done,
+                reward=reward, reward_terms=terms, term_names=np.asarray(TERM_NAMES),
                 timestep=env.control_dt, model=str(MODEL.relative_to(ROOT)),
                 step=int(step), kind=kind, cmd_vx=cfg.vx, z_min=z_min,
             )
         plot = results / f"sample_episodes_{e:03d}.png"
         plot_episodes(
-            [(q, v, k) for q, v, _d, k in episodes], out=plot,
+            [(q, v, k) for q, v, _d, _r, _t, k in episodes], out=plot,
             control_dt=env.control_dt, cmd_vx=cfg.vx, z_min=z_min, step=int(step))
 
         print(f"[hexapod_ppo] eval {e:03d} @ step {int(step):,}: saved "

@@ -23,7 +23,6 @@ from controlkit.reward import (
     Command,
     FootState,
     HexapodIds,
-    RewardWeights,
     base_ang_vel,
     base_lin_vel,
     compute_reward_2,
@@ -47,7 +46,7 @@ class HexapodEnv(Env):
         self.cfg = cfg
         self._mjx = mjx.put_model(mj_model)
         self.ids = HexapodIds(mj_model)
-        self.weights = RewardWeights()
+        self.weights = cfg.reward_weights
         self.command = Command.straight(cfg.vx)  # fixed forward command
         self.sim_dt = float(mj_model.opt.timestep)
         self.control_dt = self.sim_dt * cfg.decimation
