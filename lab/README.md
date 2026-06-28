@@ -18,13 +18,14 @@ never the reverse.
 
 ## Shape of an experiment (Recommended, not enforced)
 
-Each experiment is a subpackage, launched from the CLI:
+Each experiment is a sub-package, launched from the CLI:
 
 ```
 lab/<experiment>/
   config.py     # the knobs (a dataclass) — the "what"
   env.py        # system-specific wiring
-  run.py        # the experiment body + launcher  →  python -m lab.<experiment>.run
+  run.py        # the experiment entrypoint `python -m lab.<experiment>.run [<config-path>] ...`
+  viz.py        # visualization of the results `python -m lab.<experiment>.viz <run-dir>`
 ```
 
 Nesting is fine for grouping or versioning (e.g. `lab/mpc/hexapod/v0`): the leaf

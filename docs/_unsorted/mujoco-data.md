@@ -45,13 +45,13 @@ in `hexapod.xml` suffixes the copy index, giving `femur0..femur5`.
 For the five everyday namespaces: resolve `id` from the model, then index the
 data array with it.
 
-| namespace | id from model | access (using `id`) |
-|---|---|---|
-| **body** | `m.body(name).id` | `d.xpos[id]`, `d.xquat[id]`, `d.xmat[id]`, `d.cvel[id]`, `d.subtree_com[id]`, `d.cfrc_ext[id]` |
-| **joint** | `m.joint(name).id` | `d.xanchor[id]`, `d.xaxis[id]`, `d.qpos[m.jnt_qposadr[id]]`, `d.qvel[m.jnt_dofadr[id]]`, `d.qfrc_actuator[m.jnt_dofadr[id]]` |
-| **actuator** | `m.actuator(name).id` | `d.ctrl[id]`, `d.actuator_force[id]`, `d.actuator_length[id]`, `d.actuator_velocity[id]` |
-| **geom** | `m.geom(name).id` | `d.geom_xpos[id]`, `d.geom_xmat[id]` |
-| **site** | `m.site(name).id` | `d.site_xpos[id]`, `d.site_xmat[id]` |
+| namespace    | id from model         | access (using `id`)                                                                                                          |
+| ------------ | --------------------- | ---------------------------------------------------------------------------------------------------------------------------- |
+| **body**     | `m.body(name).id`     | `d.xpos[id]`, `d.xquat[id]`, `d.xmat[id]`, `d.cvel[id]`, `d.subtree_com[id]`, `d.cfrc_ext[id]`                               |
+| **joint**    | `m.joint(name).id`    | `d.xanchor[id]`, `d.xaxis[id]`, `d.qpos[m.jnt_qposadr[id]]`, `d.qvel[m.jnt_dofadr[id]]`, `d.qfrc_actuator[m.jnt_dofadr[id]]` |
+| **actuator** | `m.actuator(name).id` | `d.ctrl[id]`, `d.actuator_force[id]`, `d.actuator_length[id]`, `d.actuator_velocity[id]`                                     |
+| **geom**     | `m.geom(name).id`     | `d.geom_xpos[id]`, `d.geom_xmat[id]`                                                                                         |
+| **site**     | `m.site(name).id`     | `d.site_xpos[id]`, `d.site_xmat[id]`                                                                                         |
 
 **Joint is the exception.** Its `id` indexes the world-frame anchor/axis directly
 (`d.xanchor[id]`, `d.xaxis[id]`), but the configuration state (`qpos`/`qvel`) is
