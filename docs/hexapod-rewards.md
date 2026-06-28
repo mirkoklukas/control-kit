@@ -1,6 +1,6 @@
 # Hexapod locomotion reward
 
-Living inventory of the per-step reward terms for `controlkit.hexapod_reward`.
+Living inventory of the per-step reward terms for `controlkit.reward`.
 Built **term by term**; the `Status` column tracks what is wired into
 `compute_reward` today vs. still pending.
 

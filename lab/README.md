@@ -3,7 +3,7 @@
 The **experiments layer** of control-kit — where the churny, system-specific
 work happens.
 
-`controlkit` is the shared **library** (mpc, hexapod_reward, viz); `runkit` is
+`controlkit` is the shared **library** (mpc, reward, viz); `runkit` is
 the **run harness**; `lab` is the actual experiments built on them. Code is
 expected to be messy here, and to move *up* into the library over time:
 

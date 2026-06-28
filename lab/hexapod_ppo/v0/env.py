@@ -2,7 +2,7 @@
 
 System-specific wiring: maps the policy's normalized action to position-servo
 targets, steps MJX ``decimation`` times per control step, and scores the result
-with ``controlkit.hexapod_reward.compute_reward_2``. The reward, ids, command,
+with ``controlkit.reward.compute_reward_2``. The reward, ids, command,
 and kinematics helpers all come from the stable core; this file only glues them
 to the Brax training API.
 
@@ -18,7 +18,7 @@ import mujoco
 from brax.envs.base import Env, State
 from mujoco import mjx
 
-from controlkit.hexapod_reward import (
+from controlkit.reward import (
     Command,
     FootState,
     HexapodIds,
