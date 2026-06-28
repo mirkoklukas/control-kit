@@ -10,7 +10,7 @@ vx: 0.3                     # commanded forward speed (m/s)
 
 # --- control / sim ---
 decimation: 10             # sim steps per control step (0.04 s control dt)
-action_scale: 0.5          # ctrl = clip(action_scale * action, joint range) [rad]
+action_scale: 0.25         # ctrl = clip(rest + action_scale * action, joint range) [rad]
 episode_length: 100        # max control steps per episode
 reset_joint_noise: 0.05    # uniform rad noise on initial joint angles
 

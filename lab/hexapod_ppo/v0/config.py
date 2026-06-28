@@ -29,7 +29,7 @@ class Cfg:
 
     # --- control / sim ---
     decimation: int = 10         # sim steps per control step (0.04 s control dt -> ~25 Hz)
-    action_scale: float = 0.5    # ctrl = clip(action_scale * action, joint range) [rad]
+    action_scale: float = 0.25   # ctrl = clip(rest + action_scale * action, joint range) [rad]
     episode_length: int = 100    # max control steps before the episode truncates/resets
     reset_joint_noise: float = 0.05   # uniform rad noise on initial joint angles
 

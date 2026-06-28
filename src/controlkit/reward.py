@@ -28,6 +28,8 @@ from mujoco import mjx
 
 # Gaussian kernel width^2 for the velocity-tracking rewards.
 _TRACK_SIGMA2 = 0.25
+# Gaussian kernel width^2 (meters^2) for the base-height-keeping reward.
+_HEIGHT_SIGMA2 = 0.0025
 
 
 # --------------------------------------------------------------------------- #
@@ -40,6 +42,7 @@ class RewardWeights:
 
     lin_vel: float = 1.0
     ang_vel: float = 0.5
+    base_height: float = 1.0
     lin_vel_z: float = -2.0
     ang_vel_xy: float = -0.05
     orientation: float = -0.2
@@ -444,6 +447,7 @@ def compute_reward_2(
     air_time_target: float = 0.4,
     contact_force_thresh: float = 1.0,
     move_cmd_eps: float = 0.05,
+    height_target: float | None = None,
     dt: float,
 ) -> tuple[jax.Array, dict[str, jax.Array], FootState]:
     """Full per-step reward (all 10 terms): slices 1-2 plus the contact-driven
@@ -464,6 +468,13 @@ def compute_reward_2(
     up_b = projected_gravity(data, base, jnp.asarray(world_up))
     lin_vel = jnp.exp(-jnp.sum((v_xy_cmd - v[:2]) ** 2) / _TRACK_SIGMA2)
     ang_vel = jnp.exp(-((yaw_rate_cmd - omega[2]) ** 2) / _TRACK_SIGMA2)
+
+    # --- base height keeping: dense "alive" bonus, 1.0 at the target trunk height,
+    # falling off to 0 as it sinks. Disabled (0) when no height_target is given. ---
+    if height_target is None:
+        base_height = jnp.zeros(())
+    else:
+        base_height = jnp.exp(-((data.qpos[2] - height_target) ** 2) / _HEIGHT_SIGMA2)
 
     # --- base-stability penalties ---
     lin_vel_z = v[2] ** 2
@@ -493,6 +504,7 @@ def compute_reward_2(
     terms = {
         "lin_vel": lin_vel,
         "ang_vel": ang_vel,
+        "base_height": base_height,
         "lin_vel_z": lin_vel_z,
         "ang_vel_xy": ang_vel_xy,
         "orientation": orientation,
@@ -505,6 +517,7 @@ def compute_reward_2(
     total = (
         w.lin_vel * lin_vel
         + w.ang_vel * ang_vel
+        + w.base_height * base_height
         + w.lin_vel_z * lin_vel_z
         + w.ang_vel_xy * ang_vel_xy
         + w.orientation * orientation

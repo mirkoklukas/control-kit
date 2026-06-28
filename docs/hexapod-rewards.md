@@ -33,6 +33,7 @@ Built **term by term**; the `Status` column tracks what is wired into
 |---|---|---|---|---|
 | `lin_vel` | reward | `exp(-‖v_xy_cmd − v_xy‖² / 0.25)` | `1.0` | ✅ slice 1 |
 | `ang_vel` | reward | `exp(-(yaw_cmd − yaw_rate)² / 0.25)` | `0.5` | ✅ slice 1 |
+| `base_height` | reward | `exp(-(z − z_target)² / 0.0025)`, `z_target` = model home height (off if `None`) | `1.0` | ✅ |
 | `lin_vel_z` | penalty | `v_z²` (base frame) | `-2.0` | ✅ slice 1 |
 | `ang_vel_xy` | penalty | `roll_rate² + pitch_rate²` | `-0.05` | ✅ slice 1 |
 | `orientation` | penalty | `‖projected_gravity_xy‖²` | `-0.2` | ✅ slice 1 |

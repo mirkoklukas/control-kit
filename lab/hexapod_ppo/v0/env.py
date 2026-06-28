@@ -34,7 +34,7 @@ from .config import Cfg
 
 _WORLD_UP = (0.0, 0.0, 1.0)
 TERM_NAMES = (
-    "lin_vel", "ang_vel", "lin_vel_z", "ang_vel_xy", "orientation",
+    "lin_vel", "ang_vel", "base_height", "lin_vel_z", "ang_vel_xy", "orientation",
     "action_rate", "torques", "dof_acc", "collision", "feet_air_time",
 )
 
@@ -134,6 +134,7 @@ class HexapodEnv(Env):
             action=action,
             air_time_target=self.cfg.air_time_target,
             contact_force_thresh=self.cfg.contact_force_thresh,
+            height_target=self.z_nominal,
             dt=self.control_dt,
         )
 
