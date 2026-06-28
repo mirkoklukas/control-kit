@@ -1,7 +1,26 @@
-# controlkit
+# Control Kit
 
 A MuJoCo playground for control algorithms — classical control, model-predictive
 control, and reinforcement learning. The main target robotic platform is a hexapod. 
+
+## System requirements
+
+A few tools live outside the Python env — install once per machine:
+
+- [uv](https://docs.astral.sh/uv/) — manages the Python env (see [Setup](#setup)).
+- [glow](https://github.com/charmbracelet/glow) — terminal markdown renderer.
+
+```bash
+# macOS (Apple Silicon)
+brew install glow
+
+# Linux box (no sudo): drop the release binary into ~/.local/bin, where uv also lives
+GLOW_VER=2.0.0
+curl -fsSL "https://github.com/charmbracelet/glow/releases/download/v${GLOW_VER}/glow_${GLOW_VER}_Linux_x86_64.tar.gz" \
+  | tar -xz -C ~/.local/bin --strip-components=1 --wildcards '*/glow'
+```
+
+Verify: `command -v glow`.
 
 ## Setup
 
@@ -44,8 +63,7 @@ uv run python examples/01_mpc_cartpole.py record   # MPPI swing-up (cold: pumps 
 
 ## Note on the viewer
 
-The interactive MuJoCo viewer needs a local display, so run `--render` and
-`01_viewer.py` on your own machine, not in a remote/headless sandbox.
+The interactive MuJoCo viewer needs a local display, so run with `--render` on your own machine, not in a remote/headless sandbox.
 
 ## Model
 
@@ -57,6 +75,5 @@ upright, `π` is hanging down. Single force actuator on the cart, `ctrlrange
 
 ```
 models/        MuJoCo MJCF models
-examples/      runnable controllers (LQR, MPC, RL)
 runs/          saved RL policies (gitignored)
 ```

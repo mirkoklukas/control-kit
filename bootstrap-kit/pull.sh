@@ -8,7 +8,8 @@
 # copies so the repo tracks the latest. The inverse of prep.sh shipping out.
 set -euo pipefail
 
-REMOTE_DIR="bootstrap-kit"            # ~/bootstrap-kit on the box (matches prep.sh)
+# ~/bootstrap-kit on the box (matches prep.sh)
+REMOTE_DIR="bootstrap-kit"            
 
 HOST="${1:-}"
 [ -n "$HOST" ] || { echo "usage: ./pull.sh <HOST>   (ssh alias or user@ip)" >&2; exit 1; }

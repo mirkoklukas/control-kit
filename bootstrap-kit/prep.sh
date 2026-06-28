@@ -53,9 +53,14 @@ if [ "${#SECRETS[@]}" -gt 0 ]; then
   done
 fi
 
-# --- uv + ship the kit -------------------------------------------------------
+# --- uv + glow (markdown viewer) + ship the kit -------------------------------------------------------
 say "installing uv on $HOST (if absent)"
 ssh "$HOST" 'command -v uv >/dev/null || curl -LsSf https://astral.sh/uv/install.sh | sh'
+
+say "installing glow on $HOST" 
+GLOW_VER=2.0.0
+curl -fsSL "https://github.com/charmbracelet/glow/releases/download/v${GLOW_VER}/glow_${GLOW_VER}_Linux_x86_64.tar.gz" \
+  | tar -xz -C ~/.local/bin --strip-components=1 --wildcards '*/glow'
 
 say "shipping kit -> ~/$REMOTE_DIR"
 ssh "$HOST" "mkdir -p ~/$REMOTE_DIR"
