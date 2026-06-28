@@ -6,6 +6,11 @@ Each note gets its own subsection. Structure `## title [(date)] [#tags]`
 
 This is just an example.
 
+## Set up tooling for team
+
+- High level project planning (notion?)
+- Slack for communication
+
 ## runkit `@viz` decorator: rehydrate ctx from a run_dir (28-06-2026) #runkit #viz #todo
 
 TODO (runkit): a decorator, sibling to `@experiment`, that lets an experiment
