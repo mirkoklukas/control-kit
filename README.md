@@ -74,6 +74,28 @@ upright, `π` is hanging down. Single force actuator on the cart, `ctrlrange
 ## Layout
 
 ```
-models/        MuJoCo MJCF models
-runs/          saved RL policies (gitignored)
+src/controlkit/   shared library (mpc, reward, viz); the `ctk` CLI lives here
+lab/              experiments built on controlkit (see lab/README.md)
+models/           MuJoCo MJCF models
+docs/             notes and design docs
+bootstrap-kit/    scripts to bootstrap a remote GPU box
+examples/         standalone, self-contained scripts
+runs/             immutable run dirs: config + checkpoints + results (gitignored)
 ```
+
+`src/controlkit` is the shared library; `lab` is where the churny,
+experiment-specific work happens and depends on it (never the reverse). A helper
+that outgrows one experiment moves into `controlkit`.
+
+## Running experiments
+
+Each experiment under `lab/` is a sub-package launched from the CLI:
+
+```bash
+uv run python -m lab.<exp>.run [config.yaml] key=value ...   # produce a run
+uv run python -m lab.<exp>.viz <run-dir>                     # plot its results
+```
+
+Outputs land in a gitignored `runs/` dir. See [`lab/README.md`](lab/README.md)
+for the experiment layout, plus pulling runs from the GPU box and replaying
+trajectories (`ctk viz`).
