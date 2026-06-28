@@ -16,6 +16,9 @@ dependencies = [
     "runkit",
 ]
 
+[project.scripts]
+ctk = "controlkit.cli:app"
+
 [project.optional-dependencies]
 dev = ["ipython", "ruff"]
 # warp-lang silences mujoco's optional Warp-backend import probe (the

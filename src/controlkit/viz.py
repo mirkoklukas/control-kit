@@ -15,14 +15,14 @@ import mujoco
 import numpy as np
 import typer
 
-_ROOT = Path(__file__).resolve().parents[2]   # lab/core/mjviz.py -> repo root
+_ROOT = Path(__file__).resolve().parents[2]   # src/controlkit/viz.py -> repo root
 
 
 app = typer.Typer(
     add_completion=False, no_args_is_help=True,
     help="Replay (play) or plot a saved npz state trajectory. The viewer is local "
          "only: needs a display, and on macOS requires `mjpython`; the plot is "
-         "headless-safe. Example: uv run mjpython -m lab.core.mjviz play runs/hexapod.npz",
+         "headless-safe. Example: uv run mjpython -m controlkit.viz play runs/hexapod.npz",
 )
 
 @app.command()
@@ -33,30 +33,60 @@ def play(file, model=None, loop=True):
     model: MJCF path; if None, taken from the npz `model` field, resolved
            against the repo root.
     loop:  restart the replay when it reaches the end (until the window closes).
+
+    Playback keys: space = pause/resume, left/right = step one frame (scrub while
+    paused), up/down = slower/faster. The viewer's time readout tracks the frame.
     """
     from mujoco import viewer as mj_viewer
 
     file = Path(file)
     npz = np.load(file)
     qpos, qvel, dt = npz["qpos"], npz["qvel"], float(npz["timestep"])
+    n = len(qpos)
     model_path = Path(model) if model is not None else _ROOT / str(npz["model"])
-    print(f"loaded {len(qpos)} frames from {file} (dt={dt}s); model={model_path}")
+    print(f"loaded {n} frames from {file} (dt={dt}s); model={model_path}")
+    print("keys: space=pause/resume  left/right=step frame  up/down=speed")
+
+    # GLFW key codes the passive viewer hands to key_callback.
+    SPACE, RIGHT, LEFT, UP, DOWN = 32, 262, 263, 265, 264
+    st = {"paused": False, "idx": 0, "step": 0, "speed": 1.0}
+
+    def on_key(key):
+        if key == SPACE:
+            st["paused"] = not st["paused"]
+        elif key == RIGHT:
+            st["paused"], st["step"] = True, 1
+        elif key == LEFT:
+            st["paused"], st["step"] = True, -1
+        elif key == UP:
+            st["speed"] = min(st["speed"] * 1.5, 16.0)
+        elif key == DOWN:
+            st["speed"] = max(st["speed"] / 1.5, 1 / 16.0)
 
     mj_model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(mj_model)
-    with mj_viewer.launch_passive(mj_model, data) as viewer:
+    with mj_viewer.launch_passive(mj_model, data, key_callback=on_key) as viewer:
         while viewer.is_running():
-            for q, v in zip(qpos, qvel):
-                if not viewer.is_running():
+            i = st["idx"] % n
+            data.qpos[:] = qpos[i]
+            data.qvel[:] = qvel[i]
+            data.time = i * dt                       # viewer clock tracks the trajectory
+            mujoco.mj_forward(mj_model, data)        # reconstruct poses for rendering
+            viewer.sync()
+
+            if st["paused"]:
+                if st["step"]:                       # one-shot scrub while paused
+                    st["idx"], st["step"] = (i + st["step"]) % n, 0
+                time.sleep(1 / 60)                   # idle redraw, stay responsive
+                continue
+
+            time.sleep(dt / st["speed"])             # real-time pacing, speed-scaled
+            st["idx"] = i + 1
+            if st["idx"] >= n:
+                if not loop:
                     break
-                data.qpos[:] = q
-                data.qvel[:] = v
-                mujoco.mj_forward(mj_model, data)   # reconstruct poses for rendering
-                viewer.sync()
-                time.sleep(dt)                       # real-time pacing
-            if not loop:
-                break
-            time.sleep(0.5)                          # pause, then loop the replay
+                st["idx"] = 0
+                time.sleep(0.3)                      # brief pause, then loop
 
 
 
@@ -120,7 +150,7 @@ def plot(files: list[str], out: str = None):
     saves a PNG (headless-safe); otherwise opens an interactive window. Reads
     cmd_vx / z_min / kind / timestep from each npz when present.
 
-        uv run python -m lab.core.mjviz plot <run>/results/sample_episode_005_*.npz
+        uv run python -m controlkit.viz plot <run>/results/sample_episode_005_*.npz
     """
     eps, dt, cmd_vx, z_min, step = [], 1.0, None, None, 0
     for f in files:

@@ -148,7 +148,7 @@ def play(
     file: Annotated[Path, typer.Argument(help="saved .npz trajectory to replay")],
 ) -> None:
     """Replay a saved trajectory in the passive viewer (local; needs mjpython on macOS)."""
-    from lab.core.mjviz import play as play_npz
+    from controlkit.viz import play as play_npz
 
     play_npz(file)
 

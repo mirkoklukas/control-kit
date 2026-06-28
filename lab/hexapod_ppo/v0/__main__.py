@@ -34,7 +34,7 @@ from brax.training.agents.ppo import train as ppo # type: ignore
 
 from runkit import RunContext, experiment, main
 
-from lab.core.mjviz import plot_episodes
+from controlkit.viz import plot_episodes
 
 from .config import Cfg
 from .env import HexapodEnv, TERM_NAMES

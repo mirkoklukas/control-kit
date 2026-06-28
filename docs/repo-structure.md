@@ -45,20 +45,25 @@ control-kit/
 Anything that is not python source lives outside `src/`: the agent-driven
 box-setup kit is a bundled asset under `assets/bootstrap-kit/`, not a package.
 
-## `src/controlkit/` — reusable control algorithms (the core)
+## `src/controlkit/` — the shared library
 
-The heart of the project: framework-agnostic building blocks. Nothing here
-imports MuJoCo or knows about a specific robot; dynamics, observation, proposal,
-and cost all enter as caller-supplied functions.
+Code reused across experiments. Not a purist "framework-agnostic core" — it's
+just the one tier above `lab/`, holding whatever experiments share. The
+dependency points one way: `lab/` imports from here, never the reverse.
 
-- `mpc.py` — sampling MPC (MPPI). Two builders:
+- `mpc.py` — sampling MPC (MPPI), genuinely framework-agnostic; dynamics,
+  observation, proposal, and cost all enter as caller-supplied functions. Two
+  builders:
   - `make_rollout_sampler(env_step, control, observation)` → a
     `(key, s0, T) → trajectory` rollout (a `jax.lax.scan`).
   - `make_mppi_planner(rollout_sampler, cost, T, N, lam)` → a `(key, s0) → plan`
     of shape `(T, nu)`; the receding-horizon control is `plan[0]`.
+- `hexapod_reward.py` — hexapod-specific reward terms (see
+  [`docs/hexapod-rewards.md`](hexapod-rewards.md)).
+- `viz.py` — replay/plot saved `.npz` trajectories in the MuJoCo passive viewer
+  (imports mujoco; local-only, `mjpython` on macOS).
 
-The system-specific wiring (MJX step, observation, proposal, cost) lives in the
-`examples/`, not here. Related notes: [`docs/mpc.md`](mpc.md).
+Related notes: [`docs/mpc.md`](mpc.md).
 
 ## `src/runkit/` — reproducible experiment runs
 

@@ -3,19 +3,18 @@
 The **experiments layer** of control-kit — where the churny, system-specific
 work happens.
 
-The repo separates code by how much it churns: `controlkit` is the stable,
-system-agnostic **core**; `runkit` is the **run harness**; `lab` is everything
-in between and on top — the actual experiments built on them. Code is expected
-to be messy here, and to move *up* over time:
+`controlkit` is the shared **library** (mpc, hexapod_reward, viz); `runkit` is
+the **run harness**; `lab` is the actual experiments built on them. Code is
+expected to be messy here, and to move *up* into the library over time:
 
 ```
-lab/<experiment>   →   lab.core   →   controlkit
- (one experiment)     (shared across      (stable, general,
-                       experiments)        graduation target)
+lab/<experiment>   →   controlkit
+ (one experiment)      (shared across experiments)
 ```
 
-A helper that outgrows a single experiment moves to `lab.core`; a piece that
-becomes stable and system-agnostic graduates further, into `controlkit`.
+A helper that outgrows a single experiment moves into `controlkit`. The
+dependency only ever points one way: experiments import from `controlkit`,
+never the reverse.
 
 ## Shape of an experiment
 
@@ -51,17 +50,23 @@ Run dirs are never mutated after creation, so adding `--ignore-existing` lets a
 repeat pull skip everything already local without even checksumming it. Output
 stays in the gitignored `runs/`, ready for the replay step below.
 
-## Replaying trajectories (`lab.core.mjviz`)
+## Replaying trajectories (`controlkit.viz`)
 
 Experiments that record a state trajectory (the MPC examples, the PPO sample
 episodes) save it as an `.npz` carrying `qpos`/`qvel`/`timestep`/`model`. Replay
-any of them in the MuJoCo passive viewer (local only; needs `mjpython` on macOS):
+or plot any of them via the `ctk viz` CLI:
 
 ```bash
-uv run mjpython -m lab.hexapod_mpc_exp play <run>/results/sample_episode_<step>.npz
-# or directly:
-uv run mjpython -c "from lab.core.mjviz import play; play('<run>/results/sample_episode_0.npz')"
+# replay in the MuJoCo passive viewer (local only; needs mjpython on macOS)
+uv run mjpython -m controlkit.viz play <run>/results/sample_episode_<step>.npz
+
+# plot base states (headless-safe; --out to save a PNG)
+uv run ctk viz plot <run>/results/sample_episode_*.npz
 ```
+
+The `play` command opens a window, so on macOS it needs `mjpython` and is
+invoked as `-m controlkit.viz` (the `ctk` script runs under plain Python).
+`plot` is headless-safe and runs fine under `ctk viz plot`.
 
 ## Relationship to runkit
 
