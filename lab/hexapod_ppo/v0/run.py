@@ -159,7 +159,7 @@ def run(cfg: Cfg, ctx: RunContext):
     # idx 0 is the deterministic episode, 1..K the stochastic ones. The sampler is
     # built lazily on the first call, when brax hands us `make_policy`.
     n_sample_steps = max(1, round(5.0 / env.control_dt))
-    z_min = cfg.z_min_frac * cfg.z_nominal
+    z_min = cfg.z_min_frac * env.z_nominal
     _sampler = []      # lazily-built sampler (closure over make_policy)
     _eval = [0]        # progress-update counter -> filename index
 

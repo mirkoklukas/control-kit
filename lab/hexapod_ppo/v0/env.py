@@ -68,6 +68,7 @@ class HexapodEnv(Env):
             self._home_qpos = jnp.asarray(mj_model.qpos0)
             self._home_qvel = jnp.zeros(int(mj_model.nv))
         self._rest = self._home_qpos[7:]  # per-joint stance angles (action center)
+        self.z_nominal = float(self._home_qpos[2])  # standing trunk height, from the model
 
         # observation size (host-side, once).
         d = mjx.forward(self._mjx, mjx.make_data(self._mjx))
@@ -138,7 +139,7 @@ class HexapodEnv(Env):
         )
 
         up = projected_gravity(data, self.ids.base, jnp.asarray(_WORLD_UP))[2]
-        fell = (data.qpos[2] < self.cfg.z_min_frac * self.cfg.z_nominal) | (
+        fell = (data.qpos[2] < self.cfg.z_min_frac * self.z_nominal) | (
             up < self.cfg.up_min
         )
 

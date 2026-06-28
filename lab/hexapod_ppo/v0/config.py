@@ -36,8 +36,9 @@ class Cfg:
     contact_force_thresh: float = 1.0
 
     # --- termination ---
-    z_nominal: float = 0.20      # standing trunk height (m)
-    z_min_frac: float = 0.5      # done if trunk z < z_min_frac * z_nominal
+    # z_nominal (standing trunk height) is NOT here: it's model-dependent, derived
+    # in env.py from the home keyframe. z_min_frac scales it for the fall cutoff.
+    z_min_frac: float = 0.5      # done if trunk z < z_min_frac * z_nominal (from model)
     up_min: float = 0.5          # done if base up-axis . world up < up_min (tilt > 60 deg)
 
     # --- PPO (brax) ---
