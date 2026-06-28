@@ -99,6 +99,7 @@ const spec = {
   coxaLen: 0.06, femurLen: 0.10, tibiaLen: 0.19, thickness: 0.012, footSize: 0.018,
   restCoxa: 0, restFemur: 25, restTibia: 55,
   coxaMin: -45, coxaMax: 45, femurMin: -75, femurMax: 75, tibiaMin: -110, tibiaMax: 30,
+  kp: 25, kv: 2.5, force: 15,
   bodyColor: '#d9803a', headColor: '#e69940', coxaColor: '#d93333',
   femurColor: '#3366d9', tibiaColor: '#e6cc26', footColor: '#262633',
 };
@@ -256,6 +257,11 @@ const SLIDERS = [
     ['legDensity', 'legs', 50, 20000, 10, '', 'legs'],
     ['footDensity', 'feet', 50, 5000, 10, '', 'foot'],
   ]],
+  ['Actuators (position servo)', [
+    ['kp', 'kp (stiffness)', 5, 600, 5, ''],
+    ['kv', 'kv (damping)', 0.5, 40, 0.5, ''],
+    ['force', 'force limit', 1, 80, 1, 'N·m'],
+  ]],
 ];
 const COLORS = [
   ['bodyColor', 'body'], ['headColor', 'head'], ['coxaColor', 'coxa'],
@@ -406,6 +412,7 @@ function toConfig() {
       femur: [spec.femurMin, spec.femurMax],
       tibia: [spec.tibiaMin, spec.tibiaMax],
     },
+    actuator: { kp: spec.kp, kv: spec.kv, force: spec.force },
   };
 }
 // inverse of toConfig: apply a loaded spec to the controls + preview.
@@ -422,6 +429,8 @@ function applyConfig(cfg) {
   spec.coxaMin = jr.coxa[0]; spec.coxaMax = jr.coxa[1];
   spec.femurMin = jr.femur[0]; spec.femurMax = jr.femur[1];
   spec.tibiaMin = jr.tibia[0]; spec.tibiaMax = jr.tibia[1];
+  const a = cfg.actuator;
+  spec.kp = a.kp; spec.kv = a.kv; spec.force = a.force;
   spec.bodyColor = rgb01ToHex(cfg.body.color);
   spec.headColor = rgb01ToHex(cfg.body.head_color || cfg.body.color);
   spec.coxaColor = rgb01ToHex(cfg.legs.coxa.color); spec.femurColor = rgb01ToHex(cfg.legs.femur.color);

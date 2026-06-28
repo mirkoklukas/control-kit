@@ -51,6 +51,9 @@ def default_config() -> dict:
         "rest": {"coxa": 0.0, "femur": 25.0, "tibia": 55.0},
         # Joint limits (degrees), written to each joint's <default> range.
         "joint_range": {"coxa": [-45.0, 45.0], "femur": [-75.0, 75.0], "tibia": [-110.0, 30.0]},
+        # Position-servo gains, shared by all joints. kp = stiffness (N*m/rad),
+        # kv = damping (N*m*s/rad), force = torque limit -> forcerange [-force, force].
+        "actuator": {"kp": 25.0, "kv": 2.5, "force": 15.0},
     }
 
 
@@ -158,6 +161,8 @@ def build_xml(cfg: dict) -> str:
     jr = cfg["joint_range"]
     rng = {k: f"{jr[k][0]:g} {jr[k][1]:g}" for k in ("coxa", "femur", "tibia")}
 
+    act = cfg["actuator"]
+
     head_color = body.get("head_color") or _lighten(body["color"])
 
     actuators = "\n".join(
@@ -180,7 +185,7 @@ def build_xml(cfg: dict) -> str:
     <default class="hexapod">
       <joint type="hinge" armature="0.008" damping="0.4" frictionloss="0.02"/>
       <geom type="capsule" size="{rad:g}"/>
-      <position kp="25" kv="2.5" forcerange="-15 15"/>
+      <position kp="{act['kp']:g}" kv="{act['kv']:g}" forcerange="-{act['force']:g} {act['force']:g}"/>
       <default class="coxa">
         <joint axis="0 0 1" range="{rng['coxa']}"/>
         <geom material="coxa"/>

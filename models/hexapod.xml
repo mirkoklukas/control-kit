@@ -12,13 +12,13 @@
     <default class="hexapod">
       <joint type="hinge" armature="0.008" damping="0.4" frictionloss="0.02"/>
       <geom type="capsule" size="0.015"/>
-      <position kp="25" kv="2.5" forcerange="-15 15"/>
+      <position kp="200" kv="6" forcerange="-15 15"/>
       <default class="coxa">
         <joint axis="0 0 1" range="-45 45"/>
         <geom material="coxa"/>
       </default>
       <default class="femur">
-        <joint axis="0 1 0" range="-80 75"/>
+        <joint axis="0 1 0" range="-110 75"/>
         <geom material="femur"/>
       </default>
       <default class="tibia">
