@@ -28,6 +28,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
+from rich.console import Console
 
 from . import _compat  # noqa: F401  -- patches jax.device_put_replicated for brax 0.14
 from brax.training.agents.ppo import networks as ppo_networks # type: ignore
@@ -42,6 +43,8 @@ from .env import HexapodEnv, TERM_NAMES
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = ROOT / "models" / "hexapod.xml"
+
+console = Console()  # rich console for readable progress output
 
 
 def _fmt_dur(seconds: float) -> str:
@@ -141,21 +144,24 @@ def run(cfg: Cfg, ctx: RunContext):
         clock["t"], clock["step"] = now, step
 
         pct = 100.0 * step / total_steps
-        left = max(total_steps - step, 0)
-        rate_s = f"{rate / 1e3:6.1f}k/s" if rate else "      -- "
-        eta = _fmt_dur(left / rate) if rate else "--"
-        print(
-            f"[hexapod_ppo] {datetime.now():%H:%M:%S} +{_fmt_dur(elapsed):>6} "
-            f"step={step:>11,}/{total_steps:,} ({pct:4.1f}%) {rate_s} eta {eta:>6} "
-            f"reward={r:7.3f} +/- {std:.3f}"
+        rate_s = f"{rate / 1e3:.1f}k/s" if rate else "--"
+        eta = _fmt_dur(max(total_steps - step, 0) / rate) if rate else "--"
+        rcolor = "green" if r >= 0 else "red"
+
+        console.print(
+            f"[dim]{datetime.now():%H:%M:%S}[/] "
+            f"[bold cyan]{pct:5.1f}%[/] "
+            f"step [bold]{step:,}[/][dim]/{total_steps:,}[/]  "
+            f"[dim]{rate_s} · eta {eta} · +{_fmt_dur(elapsed)}[/]  "
+            f"reward [bold {rcolor}]{r:7.3f}[/] [dim]± {std:.3f}[/]"
         )
-        # Per-term reward breakdown (episode sums, averaged over eval envs); the
-        # terms add up to the total above. Shows e.g. whether lin_vel is paying off.
-        terms = " ".join(
-            f"{k}={float(metrics.get(f'eval/episode_reward/{k}', float('nan'))):+.2f}"
+        # Per-term reward breakdown (episode sums over eval envs); these add up to
+        # the total above. Green = paying off, red = costing reward.
+        terms = "  ".join(
+            f"{k} [{'green' if (v := float(metrics.get(f'eval/episode_reward/{k}', float('nan')))) >= 0 else 'red'}]{v:+.2f}[/]"
             for k in TERM_NAMES
         )
-        print(f"[hexapod_ppo]   terms: {terms}")
+        console.print(f"  [dim]terms[/]  {terms}")
 
     # Every eval, roll the current policy out for ~5 s and save replayable state
     # trajectories to results/ (same .npz layout the MPC `play` viewer reads) plus
@@ -199,12 +205,15 @@ def run(cfg: Cfg, ctx: RunContext):
             [(q, v, k) for q, v, _d, _r, _t, k in episodes], out=plot,
             control_dt=env.control_dt, cmd_vx=cfg.vx, z_min=z_min, step=int(step))
 
-        print(f"[hexapod_ppo] eval {e:03d} @ step {int(step):,}: saved "
-              f"{len(episodes)} episodes (1 det + {len(episodes) - 1} stochastic) "
-              f"+ {plot.name}")
+        console.print(
+            f"  [dim]eval {e:03d} @ step {int(step):,}: saved {len(episodes)} episodes "
+            f"(1 det + {len(episodes) - 1} stochastic) + {plot.name}[/]"
+        )
         if int(step) == 0:
-            print("[hexapod_ppo] compiling training step (one-time, minutes) -- "
-                  "next progress line after the first epoch.")
+            console.print(
+                "  [yellow]compiling training step (one-time, minutes) -- "
+                "next progress line after the first epoch.[/]"
+            )
 
     make_inference, params, _ = ppo.train(
         environment=env,
@@ -232,7 +241,7 @@ def run(cfg: Cfg, ctx: RunContext):
 
     # Persist params (normalizer + policy) for later eval/replay.
     (ctx.out / "policy.pkl").write_bytes(pickle.dumps(params))
-    print(f"[hexapod_ppo] saved policy -> {ctx.out / 'policy.pkl'}")
+    console.print(f"[green]saved policy[/] -> {ctx.out / 'policy.pkl'}")
     return {"config": vars(cfg)}
 
 

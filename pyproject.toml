@@ -13,6 +13,7 @@ dependencies = [
     "stable-baselines3>=2.3",
     "typer>=0.26.7",
     "pyyaml>=6",
+    "rich>=13",
     "runkit",
 ]
 
