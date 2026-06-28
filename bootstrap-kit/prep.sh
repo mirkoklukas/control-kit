@@ -7,7 +7,7 @@
 #   - primes git HTTPS credentials on the box from your local `gh` token
 #   - replicates your git identity (user.name / user.email)
 #   - copies the declared secret files to ~/.secrets/ on the box (by file, never inlined)
-#   - installs uv and sets up the kit's own uv environment
+#   - installs uv (the on-box bootstrap uses it to sync the real project)
 #   - ships this kit folder to ~/bootstrap-kit on the box
 #
 # This is the ONLY place secrets are handled. It hardcodes its own git host + secrets list.
@@ -71,9 +71,6 @@ if command -v rsync >/dev/null; then
 else
   scp -q -r "$KIT_DIR/." "$HOST:$REMOTE_DIR/"
 fi
-
-say "setting up the kit's uv environment"
-ssh "$HOST" "export PATH=\"\$HOME/.local/bin:\$PATH\"; cd ~/$REMOTE_DIR && uv sync"
 
 say "done. next: ssh $HOST, then run Claude:"
 say "  cd ~/$REMOTE_DIR && claude --permission-mode bypassPermissions 'Read BOOTSTRAP.md and complete the bootstrap.'"
