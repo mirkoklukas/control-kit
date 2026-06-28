@@ -75,6 +75,6 @@ fi
 say "done. next: ssh $HOST, then run install and run Claude:"
 say "  curl -fsSL https://claude.ai/install.sh | bash"
 say "  cd ~/ && claude --permission-mode bypassPermissions"
-say "tell claude: 'Read `~/bootstrap-kit/BOOTSTRAP.md` and complete the bootstrap.'"
-# say "  cd ~/$REMOTE_DIR && claude --permission-mode bypassPermissions 'Read BOOTSTRAP.md and complete the bootstrap.'"
+say "tell claude: 'Read ~/bootstrap-kit/BOOTSTRAP.md and complete the bootstrap.'"
+# say "  cd ~/ && claude --permission-mode bypassPermissions 'Read ~/bootstrap-kit/BOOTSTRAP.md and complete the bootstrap.'"
 

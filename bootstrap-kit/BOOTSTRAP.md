@@ -1,4 +1,4 @@
-# CLAUDE.md — instructions for the setup agent
+# BOOTSTRAP.md — instructions for the setup agent
 
 Your job: make every task in `goals.yaml` reach its definition of done on this
 fresh instance — its `pass` command exits 0 — AND leave behind a `bootstrap.sh`
@@ -23,7 +23,7 @@ is what prevents drift between "what worked" and "what's in the script."
 Per-VM context, preconditions, and extra constraints live in **ENVIRONMENT.md**
 — a file the user edits freely per task, machine, or run. Read it before you
 start and honor everything in it proactively, not as a box to tick at the end.
-This file (CLAUDE.md) is the stable contract; ENVIRONMENT.md is the variable
+This file (BOOTSTRAP.md) is the stable contract; ENVIRONMENT.md is the variable
 layer — don't put environment-specific rules here.
 
 How it ties to `goals.yaml`: anything *checkable* belongs there as a `pass`
@@ -46,7 +46,7 @@ in ENVIRONMENT.md.
 ## Tests are the oracle — don't touch them
 
 - Do NOT edit any of the bootstrap-kit files: `README.md`, `goals.yaml`,
-  `ENVIRONMENT.md`, `CLAUDE.md`. They are read-only input.
+  `ENVIRONMENT.md`, `BOOTSTRAP.md`. They are read-only input.
 - Do NOT edit, skip, mock-out, or weaken any `pass` command or any test file in
   a cloned repo. The test is the spec.
 - After a repo's tests pass, confirm you didn't modify them:
