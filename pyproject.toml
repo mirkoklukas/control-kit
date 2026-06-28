@@ -31,6 +31,10 @@ ppo = ["controlkit[mjx]", "brax>=0.10"]
 # GPU JAX (Linux + NVIDIA only). Inherits the jax version resolved by `mjx`;
 # the marker keeps it off macOS, where no CUDA wheels exist. See README.
 gpu = ["jax[cuda12]; sys_platform == 'linux'"]
+# Full GPU training stack: ppo + gpu in one flag, so the same `--extra vm`
+# works for testing and running on the cloud GPU box. On macOS the gpu part
+# is a no-op (marker), so this just resolves to the ppo stack.
+vm = ["controlkit[gpu,ppo]"]
 
 # runkit lives in its own repo now; consumed as a local editable checkout.
 [tool.uv.sources]

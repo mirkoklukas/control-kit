@@ -23,4 +23,4 @@ tasks:
     type: repo
     do:   install https://github.com/mirkoklukas/control-kit
     note: Needs to have the same parent folder as `run-kit`.
-    pass: uv run --extra ppo python -m lab.hexapod_ppo.v0.smoke ; echo "exit=$?"
+    pass: uv run --extra vm python -m lab.hexapod_ppo.v0.smoke ; echo "exit=$?"
