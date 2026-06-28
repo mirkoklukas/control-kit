@@ -31,3 +31,6 @@ function a `ctx` reconstructed from that dir.
 ## runkit experiment decorator
 - set config default yaml.
 - counter labels for run dirs. 
+
+## Understand MuJoCo Viewer
+- can we input and control in there? read of forces and set actuator settings:  for PID it's `Kp`, `Ki`, `Kd` (proportional/integral/derivative) https://en.wikipedia.org/wiki/PID_controller
