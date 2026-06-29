@@ -33,6 +33,7 @@ class Cfg:
     action_scale: float = 0.25   # ctrl = clip(rest + action_scale * action, joint range) [rad]
     episode_length: int = 100    # max control steps before the episode truncates/resets
     reset_joint_noise: float = 0.05   # uniform rad noise on initial joint angles
+    keyframe: str = "home"       # model <keyframe>: reset pose, action-offset center, nominal height (falls back to qpos0)
 
     # --- reward ---
     air_time_target: float = 0.4

@@ -14,6 +14,7 @@ stale for a single step after an auto-reset, a negligible transient).
 """
 import dataclasses
 
+
 import jax
 import jax.numpy as jnp
 import mujoco
@@ -64,16 +65,16 @@ class HexapodEnv(Env):
         self._nu = int(mj_model.nu)
         self._feet = jnp.asarray(self.ids.feet())
 
-        # Stance pose from the <keyframe name="home">: the env resets here, and
-        # actions are commanded as offsets around it (see step). Falls back to
-        # qpos0 if the model has no such keyframe.
+        # Standing pose -- reset target, nominal trunk height, and the
+        # action-offset center all reference the model <keyframe> named by
+        # cfg.keyframe (default "home"); fall back to qpos0 if it doesn't exist.
         try:
-            self._home_qpos, self._home_qvel = keyframe(mj_model, "home")
+            self._stand_qpos, self._stand_qvel = keyframe(mj_model, cfg.keyframe)
         except KeyError:
-            self._home_qpos = jnp.asarray(mj_model.qpos0)
-            self._home_qvel = jnp.zeros(int(mj_model.nv))
-        self._rest = self._home_qpos[7:]  # per-joint stance angles (action center)
-        self.z_nominal = float(self._home_qpos[2])  # standing trunk height, from the model
+            self._stand_qpos = jnp.asarray(mj_model.qpos0)
+            self._stand_qvel = jnp.zeros(int(mj_model.nv))
+        self._rest = self._stand_qpos[7:]  # per-joint stance angles (action-offset center)
+        self.z_nominal = float(self._stand_qpos[2])  # standing trunk height, from the model
 
         # observation size (host-side, once).
         d = mjx.forward(self._mjx, mjx.make_data(self._mjx))
@@ -99,12 +100,12 @@ class HexapodEnv(Env):
     def reset(self, rng: jax.Array) -> State:
         rng, key = jax.random.split(rng)
         n = self.cfg.reset_joint_noise
-        qpos = self._home_qpos.at[7:].add(
+        qpos = self._stand_qpos.at[7:].add(
             jax.random.uniform(key, (self._nu,), minval=-n, maxval=n)
         )
         data = mjx.forward(
             self._mjx,
-            mjx.make_data(self._mjx).replace(qpos=qpos, qvel=self._home_qvel),
+            mjx.make_data(self._mjx).replace(qpos=qpos, qvel=self._stand_qvel),
         )
 
         # seed last_contact from the actual stance (avoids a spurious step-0 touchdown).
@@ -176,3 +177,4 @@ class HexapodEnv(Env):
             data.qvel[6:],                            # 18 joint velocities
             last_action,                              # 18
         ])
+

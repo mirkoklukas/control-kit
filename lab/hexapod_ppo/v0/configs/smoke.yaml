@@ -10,12 +10,13 @@ decimation: 10             # sim steps per control step (0.04 s control dt)
 action_scale: 0.25         # ctrl = clip(rest + action_scale * action, joint range) [rad]
 episode_length: 60         # short episodes (vs 100) -- just exercising the loop
 reset_joint_noise: 0.05    # uniform rad noise on initial joint angles
+keyframe: home             # model <keyframe>: reset pose, action-offset center, nominal height
 
 # --- reward ---
 air_time_target: 0.4
 contact_force_thresh: 1.0
 
-# --- termination (z_nominal is derived from the model's home keyframe) ---
+# --- termination (z_nominal is derived from the configured keyframe) ---
 z_min_frac: 0.5            # done if trunk z < z_min_frac * z_nominal
 up_min: 0.5                # done if base up . world up < up_min (tilt > 60 deg)
 
