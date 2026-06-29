@@ -1,8 +1,9 @@
 # Hexapod locomotion reward
 
-Living inventory of the per-step reward terms for `controlkit.reward`.
-Built **term by term**; the `Status` column tracks what is wired into
-`compute_reward` today vs. still pending.
+Living inventory of the per-step reward terms. General term kernels live in
+`controlkit.rewards` / `controlkit.utils`; the concrete composition is
+`lab/hexapod_ppo/v0/reward.py`. Built **term by term**; the `Status` column
+tracks what is wired into `compute_reward` today vs. still pending.
 
 ## Contract (don't break these)
 

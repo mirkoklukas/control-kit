@@ -2,11 +2,12 @@
 
 Train the radial hexapod to **walk straight in +x** with PPO (Brax on MJX).
 
-The reward, ids, command, and kinematics all live in the stable core
-(`controlkit.reward`, see `docs/hexapod-rewards.md`). This experiment only
-glues them to training: `env.py` wraps the MJX dynamics + `compute_reward_2` into
-a Brax `Env`, and `run.py` runs `brax.training.agents.ppo` as a tracked
-runkit experiment, saving the policy into the run dir.
+The ids, command, kinematics, and general reward terms live in the stable core
+(`controlkit.*`, see `docs/hexapod-rewards.md`); this experiment's `reward.py`
+composes them into the concrete per-step reward. The rest is just training glue:
+`env.py` wraps the MJX dynamics + `compute_reward` into a Brax `Env`, and `run.py`
+runs `brax.training.agents.ppo` as a tracked runkit experiment, saving the policy
+into the run dir.
 
 ## Run
 

@@ -2,9 +2,9 @@
 
 System-specific wiring: maps the policy's normalized action to position-servo
 targets, steps MJX ``decimation`` times per control step, and scores the result
-with ``controlkit.reward.compute_reward_2``. The reward, ids, command,
-and kinematics helpers all come from the stable core; this file only glues them
-to the Brax training API.
+with this experiment's ``reward.compute_reward``. The ids, command, kinematics,
+and general reward terms come from the stable core (``controlkit.*``); this file
+only glues them to the Brax training API.
 
 Cross-step reward state (``foot_state``, ``last_action``) is threaded through
 ``State.info``. The command is a fixed forward twist (``Command.straight(vx)``),
@@ -20,19 +20,17 @@ import mujoco
 from brax.envs.base import Env, State
 from mujoco import mjx
 
-from controlkit.mjx.utils import keyframe
-from controlkit.reward import (
-    Command,
-    FootState,
-    HexapodIds,
+from controlkit.utils import (
     base_ang_vel,
     base_lin_vel,
-    compute_reward_2,
     foot_contacts,
+    keyframe,
     projected_gravity,
 )
+from controlkit.hexapod import Command, FootState, HexapodIds
 
 from .config import Cfg
+from .reward import compute_reward
 
 _WORLD_UP = (0.0, 0.0, 1.0)
 TERM_NAMES = (
@@ -131,7 +129,7 @@ class HexapodEnv(Env):
 
         data, _ = jax.lax.scan(sim, state.pipeline_state, None, length=self.cfg.decimation)
 
-        total, terms, new_foot = compute_reward_2(
+        total, terms, new_foot = compute_reward(
             data,
             cmd=self.command,
             ids=self.ids,

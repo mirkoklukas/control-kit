@@ -1,6 +1,7 @@
 """Config for hexapod_ppo v0.
 
-A leaf module so both run.py (the runner) and env.py (the Brax ``Env``) can
+A low module (depends only on ``.reward``, which depends only on
+``controlkit.*``) so both run.py (the runner) and env.py (the Brax ``Env``) can
 import ``Cfg`` without a circular import (env wraps Cfg; run imports env).
 """
 import dataclasses
@@ -9,7 +10,7 @@ from pathlib import Path
 
 import yaml
 
-from controlkit.reward import RewardWeights
+from .reward import RewardWeights
 
 
 @dataclass
@@ -37,7 +38,7 @@ class Cfg:
     air_time_target: float = 0.4
     contact_force_thresh: float = 1.0
 
-    # Per-term weights (controlkit.reward.RewardWeights; the sign carries the
+    # Per-term weights (.reward.RewardWeights; the sign carries the
     # penalty direction). Nested, so override any term from the CLI, e.g.
     # reward_weights.torques=0 to ablate the torque penalty. env.py uses this directly.
     reward_weights: RewardWeights = dataclasses.field(default_factory=RewardWeights)
