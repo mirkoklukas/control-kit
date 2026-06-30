@@ -22,7 +22,7 @@ app.add_typer(viz_app, name="viz")
 app.add_typer(modelgen_app, name="model-gen")
 
 
-@app.command("pull-runs")
+@app.command("pull")
 def pull_runs(
     host: str = typer.Argument(..., help="Remote host (ssh alias or user@host)."),
     root: Optional[Path] = typer.Argument(
