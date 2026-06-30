@@ -112,7 +112,7 @@ class HexapodEnv(Env):
         # observation size (host-side, once).
         self._obs_size = None
         _d = mjx.forward(self.model, mjx.make_data(self.model))
-        _obs = _observe(self, State(_d, None, jnp.zeros(()), jnp.zeros(()), {}, {}))
+        _obs = _observe(self, State(_d, None, jnp.zeros(()), jnp.zeros(()), {}, {"last_action": jnp.zeros(self._nu), "contact": jnp.zeros(len(self.feet)), "load": jnp.zeros(len(self.feet))}))
         self._obs_size = int(_obs.shape[0])
 
     # --- Brax Env API ---
