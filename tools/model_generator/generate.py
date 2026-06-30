@@ -54,6 +54,10 @@ def default_config() -> dict:
         # Position-servo gains, shared by all joints. kp = stiffness (N*m/rad),
         # kv = damping (N*m*s/rad), force = torque limit -> forcerange [-force, force].
         "actuator": {"kp": 25.0, "kv": 2.5, "force": 15.0},
+        # Ground contact: the floor geom is given priority so its friction alone
+        # governs foot<->floor contact (no element-wise-max ambiguity with the
+        # feet). Three coefficients: [slide, torsion, roll]; higher slide = grip.
+        "floor": {"friction": [2.0, 0.5, 0.5]},
     }
 
 
@@ -162,6 +166,7 @@ def build_xml(cfg: dict) -> str:
     rng = {k: f"{jr[k][0]:g} {jr[k][1]:g}" for k in ("coxa", "femur", "tibia")}
 
     act = cfg["actuator"]
+    floor_friction = " ".join(f"{x:g}" for x in cfg["floor"]["friction"])
 
     head_color = body.get("head_color") or _lighten(body["color"])
 
@@ -219,7 +224,8 @@ def build_xml(cfg: dict) -> str:
 
   <worldbody>
     <light pos="0 0 2.0" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
-    <geom name="floor" type="plane" size="0 0 0.05" material="grid" contype="1" conaffinity="1"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid" contype="1" conaffinity="1"
+          priority="1" friction="{floor_friction}"/>
 
     <body name="base" pos="0 0 {bz:g}">
       <freejoint name="root"/>

@@ -100,9 +100,14 @@ const spec = {
   restCoxa: 0, restFemur: 25, restTibia: 55,
   coxaMin: -45, coxaMax: 45, femurMin: -75, femurMax: 75, tibiaMin: -110, tibiaMax: 30,
   kp: 25, kv: 2.5, force: 15,
+  frictionSlide: 2.0, frictionTorsion: 0.5, frictionRoll: 0.5,
   bodyColor: '#d9803a', headColor: '#e69940', coxaColor: '#d93333',
   femurColor: '#3366d9', tibiaColor: '#e6cc26', footColor: '#262633',
 };
+
+// Display-only toggles (not part of the spec/YAML). Range wedges are drawn on
+// one representative leg since joint_range is shared across all six.
+let showRanges = false;
 
 // ---------- scene (MuJoCo is Z-up) ----------
 const viewEl = document.getElementById('view');
@@ -163,6 +168,36 @@ function baseHeight() {
   return spec.femurLen * Math.sin(af) + spec.tibiaLen * Math.sin(af + at) + spec.footSize;
 }
 
+// Filled sector showing a joint's [aMin, aMax] sweep (degrees), radius = the
+// segment length so it traces where the segment tip can travel. Built in the xy
+// plane (sweep about +z, matching the coxa yaw joint); pass rotX = -PI/2 to lay
+// it into the xz plane for the femur/tibia lift joints (sweep about +y).
+function rangeWedge(radius, aMinDeg, aMaxDeg, colorHex, rotX) {
+  const g = new THREE.Group();
+  if (rotX) g.rotation.x = rotX;
+  const t0 = aMinDeg * DEG, len = (aMaxDeg - aMinDeg) * DEG;
+  const seg = Math.max(2, Math.round(Math.abs(aMaxDeg - aMinDeg) / 4));
+  const [r, gr, b] = hexToRgb01(colorHex);
+  const color = new THREE.Color(r, gr, b);
+
+  const fill = new THREE.Mesh(
+    new THREE.CircleGeometry(radius, seg, t0, len),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18,
+      side: THREE.DoubleSide, depthWrite: false }));
+  g.add(fill);
+
+  // outline: center -> arc -> center, so both range bounds are clearly edged.
+  const pts = [new THREE.Vector3(0, 0, 0)];
+  for (let i = 0; i <= seg; i++) {
+    const a = t0 + len * i / seg;
+    pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
+  }
+  pts.push(new THREE.Vector3(0, 0, 0));
+  g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })));
+  return g;
+}
+
 // ---------- build robot from spec ----------
 function build() {
   scene.remove(robot); robot = new THREE.Group(); scene.add(robot);
@@ -184,7 +219,7 @@ function build() {
         tibiaMat = mat(spec.tibiaColor), footMat = mat(spec.footColor);
   const lc = spec.coxaLen, lf = spec.femurLen, lt = spec.tibiaLen, lr = spec.thickness;
 
-  for (const ang of CORNERS) {
+  for (const [legIdx, ang] of CORNERS.entries()) {
     const legBase = new THREE.Group();
     legBase.position.set(spec.radius * Math.cos(ang * DEG), spec.radius * Math.sin(ang * DEG), 0);
     legBase.rotation.z = ang * DEG;
@@ -202,6 +237,14 @@ function build() {
     tibiaJ.add(capsule([0, 0, 0], [lt, 0, 0], lr, tibiaMat));
     const f = new THREE.Mesh(new THREE.SphereGeometry(spec.footSize, 20, 14), footMat);
     f.position.set(lt, 0, 0); tibiaJ.add(f);
+
+    // Joint-range wedges on one representative leg (values are shared anyway).
+    // Each is anchored in the joint's parent frame so the rest pose sits inside.
+    if (showRanges && legIdx === 0) {
+      legBase.add(rangeWedge(lc, spec.coxaMin, spec.coxaMax, spec.coxaColor, 0));
+      femurB.add(rangeWedge(lf, spec.femurMin, spec.femurMax, spec.femurColor, -Math.PI / 2));
+      tibiaB.add(rangeWedge(lt, spec.tibiaMin, spec.tibiaMax, spec.tibiaColor, -Math.PI / 2));
+    }
   }
   updateMasses();
 }
@@ -261,6 +304,11 @@ const SLIDERS = [
     ['kp', 'kp (stiffness)', 5, 600, 5, ''],
     ['kv', 'kv (damping)', 0.5, 40, 0.5, ''],
     ['force', 'force limit', 1, 80, 1, 'N·m'],
+  ]],
+  ['Floor friction', [
+    ['frictionSlide', 'slide (tangential)', 0, 3, 0.05, ''],
+    ['frictionTorsion', 'torsion', 0, 1, 0.01, ''],
+    ['frictionRoll', 'roll', 0, 1, 0.01, ''],
   ]],
 ];
 const COLORS = [
@@ -366,6 +414,15 @@ function buildPanel() {
   bodyEl.innerHTML = '';
   for (const k in massEls) delete massEls[k];
 
+  const dg = document.createElement('div'); dg.className = 'grp';
+  dg.innerHTML = '<p class="h">Display</p>';
+  const lbl = document.createElement('label'); lbl.className = 'col';
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = showRanges;
+  cb.style.accentColor = '#5b9bd5'; cb.style.cursor = 'pointer';
+  cb.onchange = () => { showRanges = cb.checked; build(); };
+  const sp = document.createElement('span'); sp.textContent = 'show joint ranges';
+  lbl.append(cb, sp); dg.appendChild(lbl); bodyEl.appendChild(dg);
+
   for (const [title, rows] of SLIDERS) {
     const g = document.createElement('div'); g.className = 'grp';
     g.innerHTML = `<p class="h">${title}</p>`;
@@ -413,6 +470,7 @@ function toConfig() {
       tibia: [spec.tibiaMin, spec.tibiaMax],
     },
     actuator: { kp: spec.kp, kv: spec.kv, force: spec.force },
+    floor: { friction: [spec.frictionSlide, spec.frictionTorsion, spec.frictionRoll] },
   };
 }
 // inverse of toConfig: apply a loaded spec to the controls + preview.
@@ -431,6 +489,8 @@ function applyConfig(cfg) {
   spec.tibiaMin = jr.tibia[0]; spec.tibiaMax = jr.tibia[1];
   const a = cfg.actuator;
   spec.kp = a.kp; spec.kv = a.kv; spec.force = a.force;
+  const fr = (cfg.floor && cfg.floor.friction) || [2.0, 0.5, 0.5];
+  spec.frictionSlide = fr[0]; spec.frictionTorsion = fr[1]; spec.frictionRoll = fr[2];
   spec.bodyColor = rgb01ToHex(cfg.body.color);
   spec.headColor = rgb01ToHex(cfg.body.head_color || cfg.body.color);
   spec.coxaColor = rgb01ToHex(cfg.legs.coxa.color); spec.femurColor = rgb01ToHex(cfg.legs.femur.color);
@@ -439,15 +499,21 @@ function applyConfig(cfg) {
 }
 
 const statusEl = document.getElementById('status');
-document.getElementById('load').onclick = async () => {
-  const name = document.getElementById('name').value.trim() || 'hexapod';
+const nameEl = document.getElementById('name');
+
+// Fetch output/<name>.yaml and apply it; throws if the server/file is absent.
+async function loadByName(name) {
   statusEl.className = ''; statusEl.textContent = 'loading…';
+  const r = await fetch('/load?name=' + encodeURIComponent(name));
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'load failed');
+  applyConfig(j.config);
+  statusEl.className = 'ok'; statusEl.textContent = `loaded ${j.path}`;
+}
+
+document.getElementById('load').onclick = async () => {
   try {
-    const r = await fetch('/load?name=' + encodeURIComponent(name));
-    const j = await r.json();
-    if (!j.ok) throw new Error(j.error || 'load failed');
-    applyConfig(j.config);
-    statusEl.className = 'ok'; statusEl.textContent = `loaded ${j.path}`;
+    await loadByName(nameEl.value.trim() || 'hexapod');
   } catch (e) {
     statusEl.className = 'err'; statusEl.textContent = 'error: ' + e.message;
   }
@@ -468,5 +534,14 @@ document.getElementById('save').onclick = async () => {
 };
 document.getElementById('recenter').onclick = frame;
 
-build(); frame();
+// Default to output/<name>.yaml on startup; fall back to the hardcoded spec if
+// the file or the save-server isn't available (e.g. opened over file://).
+(async () => {
+  try {
+    await loadByName(nameEl.value.trim() || 'hexapod');
+  } catch {
+    statusEl.className = ''; statusEl.textContent = '';
+    build(); frame();
+  }
+})();
 </script>

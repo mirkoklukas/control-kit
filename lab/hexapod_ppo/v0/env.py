@@ -24,7 +24,7 @@ from mujoco import mjx
 from controlkit.utils import (
     base_ang_vel,
     base_lin_vel,
-    foot_contacts,
+    get_contacts,
     keyframe,
     projected_gravity,
 )
@@ -36,8 +36,9 @@ from .reward import compute_reward
 _WORLD_UP = (0.0, 0.0, 1.0)
 TERM_NAMES = (
     "lin_vel", "ang_vel", "base_height", "lin_vel_z", "ang_vel_xy", "orientation",
-    "action_rate", "torques", "dof_acc", "collision", "feet_air_time",
+    "action_rate", "torques", "dof_acc", "collision", "feet_air_time", "feet_slip",
 )
+
 
 
 class HexapodEnv(Env):
@@ -74,7 +75,7 @@ class HexapodEnv(Env):
             self._stand_qpos = jnp.asarray(mj_model.qpos0)
             self._stand_qvel = jnp.zeros(int(mj_model.nv))
         self._rest = self._stand_qpos[7:]  # per-joint stance angles (action-offset center)
-        self.z_nominal = float(self._stand_qpos[2])  # standing trunk height, from the model
+        self.stand_height = float(self._stand_qpos[2])  # standing trunk height, from the model
 
         # observation size (host-side, once).
         d = mjx.forward(self._mjx, mjx.make_data(self._mjx))
@@ -141,12 +142,12 @@ class HexapodEnv(Env):
             action=action,
             air_time_target=self.cfg.air_time_target,
             contact_force_thresh=self.cfg.contact_force_thresh,
-            height_target=self.z_nominal,
+            height_target=self.stand_height,
             dt=self.control_dt,
         )
 
         up = projected_gravity(data, self.ids.base, jnp.asarray(_WORLD_UP))[2]
-        fell = (data.qpos[2] < self.cfg.z_min_frac * self.z_nominal) | (
+        fell = (data.qpos[2] < self.cfg.z_min_frac * self.stand_height) | (
             up < self.cfg.up_min
         )
 

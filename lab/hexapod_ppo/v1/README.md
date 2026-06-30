@@ -1,13 +1,6 @@
-# hexapod_ppo / v0
+# hexapod_ppo / v1
 
 Train the radial hexapod to **walk straight in +x** with PPO (Brax on MJX).
-
-The ids, command, kinematics, and general reward terms live in the stable core
-(`controlkit.*`, see `docs/hexapod-rewards.md`); this experiment's `reward.py`
-composes them into the concrete per-step reward. The rest is just training glue:
-`env.py` wraps the MJX dynamics + `compute_reward` into a Brax `Env`, and `run.py`
-runs `brax.training.agents.ppo` as a tracked runkit experiment, saving the policy
-into the run dir.
 
 ## Run
 
@@ -16,13 +9,7 @@ box; launch the baseline preset (see Presets) with the recommended env prefix:
 
 ```bash
 TF_CPP_MIN_LOG_LEVEL=2 JAX_COMPILATION_CACHE_DIR=~/.cache/jax \
-  uv run --extra vm python -m lab.hexapod_ppo.v0.run exp:configs/baseline.yaml --tag=baseline
-
-  TF_CPP_MIN_LOG_LEVEL=2 JAX_COMPILATION_CACHE_DIR=~/.cache/jax JAX_LOG_COMPILES=1 \
-  uv run --extra vm python -m lab.hexapod_ppo.v0.run exp:configs/baseline.yaml --tag=baseline
-
-# layer Cfg overrides as key=value on top of the preset (same env prefix):
-#   ... exp:configs/baseline.yaml vx=0.4 --tag=fast
+  uv run --extra vm python -m lab.hexapod_ppo.v1.run exp:config.yaml --tag=baseline
 ```
 
 The env prefix is recommended but optional (drop it and it still runs):

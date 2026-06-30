@@ -32,15 +32,16 @@ cd "$HOME"
 # Task: control-kit — install https://github.com/mirkoklukas/control-kit
 #   Must share the same parent folder as run-kit ($HOME); it consumes run-kit
 #   as a local editable checkout via [tool.uv.sources] runkit = ../run-kit.
-#   pass: (cd ~/control-kit && uv run --extra ppo python -m lab.hexapod_ppo.v0.smoke)
+#   pass: uv run --extra vm python -m lab.hexapod_ppo.v0.smoke ; echo "exit=$?"
 #
-#   The smoke is MJX-bound and needs the `ppo` extra (brax + mujoco-mjx + jax).
-#   `uv run --extra ppo` resolves a CPU jaxlib (the GPU-only `jax[cuda12]` lives
-#   in the separate `gpu` extra, which the pass command does not request), so the
-#   smoke runs on CPU — slow (several minutes incl. one-time JIT compile) but
-#   exits 0. Pre-sync here to front-load the heavy download.
+#   The smoke is MJX-bound. The pass command requests the `vm` extra, which is
+#   `controlkit[gpu,ppo]` — i.e. ppo (brax + mujoco-mjx + jax) PLUS the gpu
+#   extra's `jax[cuda12]`. So the smoke runs on the GPU (nvcc/CUDA toolkit is a
+#   precondition) and finishes in ~5 min incl. a one-time JIT compile, printing
+#   "SMOKE PASS" and exiting 0. Pre-sync `--extra vm` here to front-load the
+#   heavy CUDA wheel download (~3GB) so the pass command is fast.
 # ---------------------------------------------------------------------------
 [ -d "$HOME/control-kit" ] || git clone https://github.com/mirkoklukas/control-kit.git "$HOME/control-kit"
-( cd "$HOME/control-kit" && uv sync --extra ppo )
+( cd "$HOME/control-kit" && uv sync --extra vm )
 
 echo "[bootstrap] done — run the goals.yaml 'pass' commands to verify."

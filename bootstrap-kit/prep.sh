@@ -11,7 +11,7 @@
 #   - ships this kit folder to ~/bootstrap-kit on the box
 #
 # This is the ONLY place secrets are handled. It hardcodes its own git host + secrets list.
-# Claude on the box may edit this file; pull it back and re-run to apply the fix.
+# Claude on the box may edit this file in the future; so you can pull it back and re-run to apply the fix.
 set -euo pipefail
 
 # --- config (edit for your setup) --------------------------------------------

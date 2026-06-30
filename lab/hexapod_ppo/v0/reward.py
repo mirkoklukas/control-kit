@@ -31,6 +31,8 @@ from controlkit.utils import (
     base_ang_vel,
     base_lin_vel,
     foot_contacts,
+    foot_normal_forces,
+    foot_velocities,
     projected_gravity,
 )
 from controlkit.rewards import feet_air_time
@@ -56,6 +58,7 @@ class RewardWeights:
     dof_acc: float = -2.5e-7
     action_rate: float = -0.01
     feet_air_time: float = 1.0
+    feet_slip: float = -1e-2
     collision: float = -1.0
 
     def replace(self, **kw) -> "RewardWeights":
@@ -95,7 +98,7 @@ def compute_reward(
     base = ids.base
     v_xy_cmd = cmd.v[:2]
     yaw_rate_cmd = cmd.omega[2]
-
+    
     # --- task tracking (base frame, heading-invariant) ---
     v = base_lin_vel(data, base)
     omega = base_ang_vel(data, base)
@@ -136,6 +139,15 @@ def compute_reward(
         foot_state, contact, dt, air_time_target, gate=moving.astype(jnp.float32)
     )
 
+    # --- foot slip: penalize a *loaded* foot that is moving (force x speed). Load
+    # is ~0 when airborne, so this only bites planted feet that slide/scuff. ---
+    feet_geoms = jnp.asarray(ids.feet())
+    feet_load = foot_normal_forces(data, feet_geoms)  # (n_feet,) N, 0 if airborne
+    feet_vel = foot_velocities(
+        data, feet_geoms, jnp.asarray(ids.feet_bodies()), base
+    )  # (n_feet, 3) world
+    feet_slip = jnp.sum(jnp.linalg.norm(feet_vel, axis=-1) * feet_load)
+
     terms = {
         "lin_vel": lin_vel,
         "ang_vel": ang_vel,
@@ -148,6 +160,7 @@ def compute_reward(
         "dof_acc": dof_acc,
         "collision": collision,
         "feet_air_time": feet_air,
+        "feet_slip": feet_slip,
     }
     total = (
         w.lin_vel * lin_vel
@@ -161,5 +174,6 @@ def compute_reward(
         + w.dof_acc * dof_acc
         + w.collision * collision
         + w.feet_air_time * feet_air
+        + w.feet_slip * feet_slip
     )
     return total, terms, new_foot_state

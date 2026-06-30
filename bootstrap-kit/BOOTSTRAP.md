@@ -12,11 +12,12 @@ arbiter of done.
 
 ## The core rule
 
-**`bootstrap.sh` is the only thing that touches this machine.**
-Never run install commands by hand. For each step: write it into `bootstrap.sh`,
-then run `bash bootstrap.sh`, observe, fix the *script*, rerun. The script is the
-source of truth from the first command — not a log you assemble at the end. This
-is what prevents drift between "what worked" and "what's in the script."
+**Everything that touches this machine lands in `bootstrap.sh`.**
+You may run commands directly to discover what works. But the moment a step
+succeeds, append the exact commands that worked to `bootstrap.sh` — then and
+there, not reconstructed from memory at the end. The script grows one successful
+step at a time, so it always reflects what actually happened. This is what
+prevents drift between "what worked" and "what's in the script."
 
 ## Environment & extra rules
 
@@ -34,23 +35,28 @@ in ENVIRONMENT.md.
 ## Per task
 
 1. **If the task has a `do`:** discover the how — read the repo (README,
-   pyproject, CI config) or the official docs, figure out the steps yourself,
-   and write them into `bootstrap.sh` under that task's section. If it has no
-   `do`, it's a pure check — make sure the other tasks' steps produce the state
-   it asserts.
-2. **Run the script**, then run the task's `pass` command.
-3. **Read the real exit code and output.** Don't declare success because you
-   think it worked — the `pass` command exiting 0 is the only proof.
-4. If it fails, fix the script and rerun. Move on only when `pass` truly exits 0.
+   pyproject, CI config) or the official docs, figure out the steps, and run
+   them to find what works. If it has no `do`, it's a pure check — make sure the
+   other tasks' steps produce the state it asserts.
+2. **The moment the steps work, append the exact successful commands** to
+   `bootstrap.sh` under that task's section — immediately, not from memory later.
+3. **Run the task's `pass` command and read the real exit code and output.**
+   Don't declare success because you think it worked — `pass` exiting 0 is the
+   only proof.
+4. If it fails, fix and retry, keeping the script in sync. Move on only when
+   `pass` truly exits 0.
 
 ## Tests are the oracle — don't touch them
 
-- Do NOT edit any of the bootstrap-kit files: `README.md`, `goals.yaml`,
-  `ENVIRONMENT.md`, `BOOTSTRAP.md`. They are read-only input.
+- You write exactly three files: `bootstrap.sh`, `LOG.md`, `BLOCKERS.md`. Every
+  other file in the kit — `README.md`, `goals.yaml`, `ENVIRONMENT.md`,
+  `BOOTSTRAP.md`, `prep.sh`, `pull.sh`, `machine-facts.sh` — is read-only input.
+  Don't edit them.
 - Do NOT edit, skip, mock-out, or weaken any `pass` command or any test file in
   a cloned repo. The test is the spec.
-- After a repo's tests pass, confirm you didn't modify them:
-  `git -C repos/<name> diff --exit-code` must be clean for test paths.
+- After a repo's tests pass, confirm you didn't modify them: in that repo,
+  `git diff --exit-code` must be clean for test paths. (Clone locations are an
+  environment detail — see ENVIRONMENT.md; don't assume a layout here.)
 
 ## bootstrap.sh must be replay-safe
 
@@ -74,9 +80,14 @@ in ENVIRONMENT.md.
 ## Finish
 
 1. Do every task you can. Log blockers for the ones you can't.
-2. **Clean-room validation**: the real test of the script is a run from zero.
-   In a fresh container, run ONLY `bash bootstrap.sh` (nothing by hand) and
-   confirm every unblocked task's `pass` command exits 0. State you
-   accumulated during discovery can hide a missing step — this catches it.
-3. Report: "<X> of <N> green, <Y> blocked — see BLOCKERS.md", and confirm whether
-   the clean-room run passed.
+2. **Clean-room validation (best effort)**: the real test of the script is a
+   run from zero. Recreate as clean a starting point as the box allows — at
+   minimum remove the install artifacts (cloned repos, their `.venv`s, caches) —
+   then run ONLY `bash bootstrap.sh` (nothing by hand) and confirm every
+   unblocked task's `pass` command exits 0. State you accumulated during
+   discovery can hide a missing step; this catches it. A throwaway container is
+   the gold standard — not available here yet, so do the best local reset you
+   can and report exactly what that was.
+3. Report: "<X> of <N> green, <Y> blocked — see BLOCKERS.md", and confirm what
+   the clean-room run amounted to (container / fresh box / local reset) and
+   whether it passed.

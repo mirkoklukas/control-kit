@@ -166,6 +166,10 @@ class HexapodIds:
         """All foot geom ids, in leg order."""
         return np.array([self._legs[lbl].foot for lbl in LEGS], dtype=np.int32)
 
+    def feet_bodies(self) -> np.ndarray:
+        """Body id (the tibia) each foot geom belongs to, aligned with feet()."""
+        return self.model.geom_bodyid[self.feet()].astype(np.int32)
+
     @property
     def bad_geoms(self) -> np.ndarray:
         """Every geom except the floor plane and the feet (must not touch floor)."""

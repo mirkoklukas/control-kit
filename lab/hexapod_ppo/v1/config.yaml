@@ -1,0 +1,56 @@
+# Baseline A100-40GB: walk straight +x, full 50M-step budget.
+# Complete config (every Cfg field) -- self-contained, independent of config.py defaults.
+#   uv run --extra vm python -m lab.hexapod_ppo.v0.run exp:configs/baseline.yaml --tag=baseline
+
+# --- task ---
+vx: 0.3                     # commanded forward speed (m/s)
+
+# --- control / sim ---
+decimation: 10             # sim steps per control step (0.04 s control dt)
+action_scale: 0.25         # ctrl = clip(rest + action_scale * action, joint range) [rad]
+episode_length: 100        # max control steps per episode
+reset_joint_noise: 0.05    # uniform rad noise on initial joint angles
+keyframe: home             # model <keyframe>: reset pose, action-offset center, nominal height
+
+# --- reward ---
+contact_force_thresh: .05
+
+reward_weights:
+    lin_vel: 1.0
+    ang_vel: 0.5
+    base_height: 1.0
+    lin_vel_z: 2.0
+    ang_vel_xy: 0.05
+    orientation: 0.2
+    action_rate: 0.01
+    torques: 1e-4
+    dof_acc: 2.5e-7
+    load_var: 1.0
+    feet_slip: 1e-2
+
+# --- termination (z_nominal is derived from the configured keyframe) ---
+z_min_frac: 0.5            # done if trunk z < z_min_frac * z_nominal
+up_min: 0.5                # done if base up . world up < up_min (tilt > 60 deg)
+
+# --- PPO (brax) ---
+seed: 0
+num_timesteps: 50000000    # total env steps (sample budget, summed over envs)
+num_envs: 4096             # rollout batch width (collection parallelism)
+num_eval_envs: 128
+num_evals: 40              # eval every ~2 training steps -> ~40 prints over the 50M budget
+batch_size: 1024
+num_minibatches: 32
+num_updates_per_batch: 4
+unroll_length: 20
+learning_rate: 0.0003
+entropy_cost: 0.01
+discounting: 0.97
+gae_lambda: 0.95
+clipping_epsilon: 0.2
+reward_scaling: 1.0
+normalize_observations: true
+policy_hidden: [128, 128, 128]
+value_hidden: [256, 256]
+
+# --- sample episodes (saved each eval) ---
+n_sample_episodes: 4
