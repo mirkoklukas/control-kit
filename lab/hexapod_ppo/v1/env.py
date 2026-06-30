@@ -216,7 +216,7 @@ def _observe(env: HexapodEnv, state: State) -> Observation:
         base_ang_vel(data, base),                 # 3
         jnp.array([env.command.v[0], env.command.v[1], env.command.omega[2]]),  # 3
         tilt,  # 3 (tilt)
-        data.qpos[[2]],                            # 1 height
+        data.qpos[2:3],                            # 1 height
         data.qpos[7:],                            # 18 joint angles
         data.qvel[6:],                            # 18 joint velocities
         last_action,                              # 18
