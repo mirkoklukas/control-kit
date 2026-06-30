@@ -326,7 +326,6 @@ dependencies = [
     { name = "runkit" },
     { name = "scipy", version = "1.15.3", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
     { name = "scipy", version = "1.17.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
-    { name = "stable-baselines3" },
     { name = "typer" },
 ]
 
@@ -349,6 +348,9 @@ ppo = [
     { name = "brax", version = "0.14.2", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version >= '3.11'" },
     { name = "mujoco-mjx" },
     { name = "warp-lang" },
+]
+sb3 = [
+    { name = "stable-baselines3" },
 ]
 vm = [
     { name = "brax", version = "0.14.1", source = { registry = "https://pypi.org/simple" }, marker = "python_full_version < '3.11'" },
@@ -376,11 +378,11 @@ requires-dist = [
     { name = "ruff", marker = "extra == 'dev'" },
     { name = "runkit", editable = "../run-kit" },
     { name = "scipy", specifier = ">=1.11" },
-    { name = "stable-baselines3", specifier = ">=2.3" },
+    { name = "stable-baselines3", marker = "extra == 'sb3'", specifier = ">=2.3" },
     { name = "typer", specifier = ">=0.26.7" },
     { name = "warp-lang", marker = "extra == 'mjx'" },
 ]
-provides-extras = ["dev", "mjx", "ppo", "gpu", "vm"]
+provides-extras = ["dev", "sb3", "mjx", "ppo", "gpu", "vm"]
 
 [[package]]
 name = "cuda-bindings"

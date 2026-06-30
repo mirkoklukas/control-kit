@@ -10,7 +10,6 @@ dependencies = [
     "matplotlib>=3.8",
     # RL
     "gymnasium[mujoco]>=0.29",
-    "stable-baselines3>=2.3",
     "typer>=0.26.7",
     "pyyaml>=6",
     "rich>=13",
@@ -22,6 +21,11 @@ ctk = "controlkit.cli:app"
 
 [project.optional-dependencies]
 dev = ["ipython", "ruff"]
+# Classical RL stack (stable-baselines3 -> PyTorch). Kept out of base deps so
+# the GPU/jax env (`vm`) does not install torch, whose CUDA 13 nvidia wheels
+# collide with jax[cuda12]'s CUDA 12 wheels in the shared nvidia/ namespace
+# (cuDNN init fails: CUDNN_STATUS_NOT_INITIALIZED). Run with `uv run --extra sb3`.
+sb3 = ["stable-baselines3>=2.3"]
 # warp-lang silences mujoco's optional Warp-backend import probe (the
 # "Failed to import warp" prints); it does NOT change the backend -- MJX still
 # defaults to JAX unless MJX_GPU_DEFAULT_WARP=true.
