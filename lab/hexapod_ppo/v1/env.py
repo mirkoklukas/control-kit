@@ -21,6 +21,7 @@ over rather than carried. ``AutoResetWrapper`` resets ``pipeline_state``/``obs``
 but not ``info``, so the ``info`` bookkeeping is stale for one step after an
 auto-reset (a negligible transient).
 """
+import dataclasses
 from typing import Any
 
 import jax
@@ -113,7 +114,7 @@ class HexapodEnv(Env):
         self._obs_size = None
         _d = mjx.forward(self.model, mjx.make_data(self.model))
 
-        _empty_state = State(_d, None, jnp.zeros(()), jnp.zeros(()), {}, {"last_action": jnp.zeros(self._nu), "contact": jnp.zeros(len(self.feet), dtype=bool), "load": jnp.zeros(len(self.feet))})
+        _empty_state = State(_d, None, jnp.zeros(()), jnp.zeros(()), {}, {"last_action": jnp.zeros(self._nu), "contact": jnp.zeros(len(self.feet), dtype=bool), "load": jnp.zeros(len(self.feet)), "reward_weights": self._reward_weights()})
         _obs = _observe(self, _empty_state)
         self._obs_size = int(_obs.shape[0])
         _,(_rs, *_) = _reward(self, _empty_state, jnp.zeros(self._nu), _empty_state)
@@ -138,6 +139,18 @@ class HexapodEnv(Env):
     def dt(self) -> float:
         return self.control_dt
 
+    def _reward_weights(self):
+        """Per-term reward weights as a dict of jax scalars, seeded from cfg.
+
+        Carried in ``state.info`` so ``_reward`` reads them as *traced* inputs:
+        changing a weight value then does not recompile the training step (the
+        env_state is a jit input there). NB: built from cfg floats, so reset and
+        the eval unroll still recompile per config -- brax calls reset inside the
+        eval jit, where the literals bake in.
+        """
+        return {f.name: jnp.asarray(getattr(self.cfg.reward_weights, f.name), jnp.float32)
+                for f in dataclasses.fields(self.cfg.reward_weights)}
+
     # --- Brax Env API ---
     def reset(self, rng: jax.Array) -> State:
         rng, key = jax.random.split(rng)
@@ -154,7 +167,8 @@ class HexapodEnv(Env):
         info = {
             "last_action": jnp.zeros(self._nu),
             "contact": contact,
-            "load": load,}
+            "load": load,
+            "reward_weights": self._reward_weights(),}
 
         # metrics must carry the same keys step() writes (one per reward term),
         # zeroed, so the scan carry pytree is invariant and brax's EvalWrapper can
@@ -244,8 +258,7 @@ def _reward(env: HexapodEnv, state: State, action: jax.Array, state_next: State)
     """
     ids = env.ids
     cmd = env.command
-    cfg = env.cfg
-    ws = cfg.reward_weights
+    ws = state.info["reward_weights"]  # traced weights carried in state (not env.cfg)
     last_action = state.info["last_action"]
     world_up = env.world_up
     data = state_next.pipeline_state
@@ -316,7 +329,7 @@ def _reward(env: HexapodEnv, state: State, action: jax.Array, state_next: State)
     rs["feet_slip"] = - feet_slip
 
     # Weigh and Assemble
-    rs = {k: v * getattr(ws, k, 1.0) for k, v in rs.items()}
+    rs = {k: v * ws[k] for k, v in rs.items()}
     total = sum(rs.values())
     rs["total"] = total
 
