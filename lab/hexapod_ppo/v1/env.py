@@ -305,13 +305,13 @@ def _reward(env: HexapodEnv, state: State, action: jax.Array, state_next: State)
 
     # TERM: Action Smoothness
     # --- action smoothness ---
-    action_rate = jnp.mean((action - last_action) ** 2)
+    action_rate = jnp.sum((action - last_action) ** 2)
     rs["action_rate"] = - action_rate
 
     # TERMS: Effort / Regularization over the Leg DOFs
     leg_dofs = ids.leg_dofs()
-    torques = jnp.mean(data.qfrc_actuator[leg_dofs] ** 2)
-    dof_acc = jnp.mean(data.qacc[leg_dofs] ** 2)
+    torques = jnp.sum(data.qfrc_actuator[leg_dofs] ** 2)
+    dof_acc = jnp.sum(data.qacc[leg_dofs] ** 2)
     rs["torques"] = - torques
     rs["dof_acc"] = - dof_acc
 

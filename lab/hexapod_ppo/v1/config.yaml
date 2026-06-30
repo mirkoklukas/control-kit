@@ -19,12 +19,12 @@ reward_weights:
     lin_vel: 1.0
     ang_vel: 0.5
     base_height: 1.0
-    lin_vel_z: 2.0
-    ang_vel_xy: 0.05
+    lin_vel_z: 1.0
+    ang_vel_xy: 0.08
     orientation: 0.2
     action_rate: 0.01
-    torques: 1.0e-4
-    dof_acc: 2.5e-7
+    torques: 2.0e-6
+    dof_acc: 1.5e-7
     load_var: 1.0
     feet_slip: 1.0e-2
 
