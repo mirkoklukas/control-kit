@@ -152,10 +152,11 @@ class HexapodEnv(Env):
             "contact": contact,
             "load": load,}
 
+        # NOTE: metric and info have to have the same structure as 
+        # the ones in step() so that the scan carry pytree matches reset()'s. 
         state = State(data, None, 0.0, 0.0, {}, info)
         obs = _observe(self, state)
         state = state.replace(obs=obs)
-
         return state
 
     # --- Brax Env API ---
@@ -188,14 +189,16 @@ class HexapodEnv(Env):
             "last_action": action  # the action that got me here
         }
 
-        state_next = State(data, None, None, done.astype(jnp.float32), {}, info_next)
+        # Not reporting per-term metrics for now. Carry the incoming metrics dict
+        # through unchanged so the scan carry pytree stays invariant: our reset()
+        # emits {}, but brax wrappers (e.g. EvalWrapper) inject their own keys and
+        # expect step() to preserve them.
+        state_next = State(data, None, None, done.astype(jnp.float32), state.metrics, info_next)
 
         obs = _observe(self, state_next)
         reward, (terms, ) = _reward(self, state, action, state_next)
 
-        metrics_next = {f"reward/{k}": v for k, v in terms.items() if k != "total"}
-
-        state_next = state_next.replace(obs=obs, reward=reward, metrics=metrics_next)
+        state_next = state_next.replace(obs=obs, reward=reward)
 
         return state_next
 
