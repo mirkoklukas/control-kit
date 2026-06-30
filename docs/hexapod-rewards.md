@@ -133,3 +133,25 @@ $$r_t = R(s_t, a_t, s_{t+1})$$
   a *hard* action rate limit (sim-to-real win the soft penalty can't). Deterministic
   cousin: fixed exponential action filter `â_t = α·a_t + (1−α)·â_{t−1}` (legged_gym).
   Not exclusive with a small `action_rate` penalty.
+
+
+
+
+
+TABLE I:Reward terms for task tracking, style, and penalty.
+
+|                |                       |                                       |
+| -------------- | --------------------- | ------------------------------------- |
+| **Term**       | **Annotation**        | **Equation**                          |
+| **Task rg**    | Linear velocity       | 1∗exp⁡(‖𝐯t,x​y−𝐯t,x​ydes‖2/0.15)    |
+|                | Angular velocity      | 0.5∗exp⁡(‖ωt,z−ωt,zdes‖2/0.15)        |
+| **Style** rs   | D Score               | 1∗max⁡[0,1−0.25​(dtscore−1)2]         |
+| **Penalty** rl | Linear velocity       | −1∗vt,z2                              |
+|                | Angular velocity      | −0.08∗‖𝝎t,x​y‖2                      |
+|                | Joint torque          | −2​e−6∗‖𝝉‖2                          |
+|                | Joint acceleration    | −1.5​e−7∗‖𝐪¨‖2                       |
+|                | Action rate           | −0.01∗‖𝐚t−𝐚t−1‖2                    |
+|                | Collisions            | −0.05∗nc​o​l​l​i​s​i​o​n              |
+|                | Joint torque limits   | −0.05∗‖max⁡(\|𝝉t\|−𝝉l​i​m​i​t,0)‖2  |
+|                | Joint velocity limits | −0.5∗‖max⁡(\|𝒒˙t\|−𝒒˙l​i​m​i​t,0)‖2 |
+|                | Contact force         | −0.1∗‖max⁡(\|𝐟t\|−𝐟l​i​m​i​t,0)‖2   |
