@@ -36,6 +36,7 @@ from brax.training.agents.ppo import train as ppo # type: ignore
 
 from runkit import RunContext, experiment, main
 
+from controlkit import ui
 from controlkit.viz import plot_episodes
 
 from .config import Cfg
@@ -62,15 +63,31 @@ def _fmt_dur(seconds: float) -> str:
 def _make_episode_sampler(env, make_policy, n_steps, seed, n_stochastic):
     """Build a jitted sampler: ``params -> (det, sto)`` rollouts of ``n_steps``.
 
-    Returns ``sample``, which gives one **deterministic** episode from a fixed reset
-    (same initial state every call, so it is comparable across evals) plus
-    ``n_stochastic`` episodes from the *sampling* policy with independent reset +
-    action noise (so they show the exploration spread). All run without auto-reset: a
-    fall is just recorded. Each rollout yields ``(qpos, qvel, done, reward)`` stacked
-    along the time axis; the stochastic batch is ``vmap``-ed, so its leaves carry a
-    leading ``[K]`` axis.
+    Returns ``(sample, term_names)``. ``sample`` gives one **deterministic** episode
+    from a fixed reset (same initial state every call, so it is comparable across
+    evals) plus ``n_stochastic`` episodes from the *sampling* policy with independent
+    reset + action noise (so they show the exploration spread). All run without
+    auto-reset: a fall is just recorded. Each rollout yields
+    ``(qpos, qvel, done, reward, terms)`` stacked along the time axis (``terms`` is
+    ``[n, len(term_names)]``, the weighted per-term contributions that sum to
+    ``reward``, in ``term_names`` order); the stochastic batch is ``vmap``-ed, so its
+    leaves carry a leading ``[K]`` axis.
+
+    ``term_names`` is the per-term label order, derived from the env's reward metrics
+    keys (``reward/*``) and aligned with the ``terms`` columns. Pulled via
+    ``eval_shape`` (abstract, no device run -- avoids the one-time MJX step compile).
     """
     base = jax.random.PRNGKey(seed)
+
+    probe = jax.eval_shape(
+        env.step,
+        jax.eval_shape(env.reset, base),
+        jax.ShapeDtypeStruct((env.action_size,), jnp.float32),
+    )
+    term_names = tuple(
+        p[-1].key[len("reward/"):]
+        for p, _ in jax.tree_util.tree_leaves_with_path(probe.metrics)
+    )
 
     def rollout(policy, reset_key, act_key):
         state = env.reset(reset_key)
@@ -81,7 +98,8 @@ def _make_episode_sampler(env, make_policy, n_steps, seed, n_stochastic):
             action, _ = policy(st.obs, ak)
             st = env.step(st, action)
             ps = st.pipeline_state
-            return (st, k), (ps.qpos, ps.qvel, st.done, st.reward)
+            terms = jnp.stack(jax.tree_util.tree_leaves(st.metrics))  # sorted-key order
+            return (st, k), (ps.qpos, ps.qvel, st.done, st.reward, terms)
 
         _, out = jax.lax.scan(body, (state, act_key), None, length=n_steps)
         return out
@@ -100,7 +118,7 @@ def _make_episode_sampler(env, make_policy, n_steps, seed, n_stochastic):
         sto = jax.vmap(one)(keys)                              # leaves: [K, n, ...]
         return det, sto
 
-    return sample
+    return sample, term_names
 
 
 @experiment(name="hexapod_ppo_v1")
@@ -153,6 +171,16 @@ def run(cfg: Cfg, ctx: RunContext):
             f"[dim]{rate_s} · eta {eta} · +{_fmt_dur(elapsed)}[/]  "
             f"reward [bold {rcolor}]{r:7.3f}[/] [dim]± {std:.3f}[/]"
         )
+        # Per-term reward breakdown (episode sums over eval envs); these add up to
+        # the total above. Naming: brax's evaluator prepends "eval/episode_" to
+        # every env metric key, and EvalWrapper adds a "reward" key (= state.reward).
+        # So our env keys "reward/<term>" surface as "eval/episode_reward/<term>",
+        # and the scalar total surfaces as "eval/episode_reward" (read above as `r`).
+        # The trailing slash here is what separates the per-term keys from that scalar.
+        prefix = "eval/episode_reward/"
+        terms = {k[len(prefix):]: round(float(v), 3)
+                 for k, v in metrics.items() if k.startswith(prefix)}
+        ui.print_tree(terms, label="terms")
 
     # Every eval, roll the current policy out for ~5 s and save replayable state
     # trajectories to results/ (same .npz layout the MPC `play` viewer reads) plus
@@ -168,13 +196,14 @@ def run(cfg: Cfg, ctx: RunContext):
         if not _sampler:
             _sampler.append(_make_episode_sampler(
                 env, make_policy, n_sample_steps, cfg.seed, cfg.n_sample_episodes))
-        sample = _sampler[0]
+        sample, term_names = _sampler[0]
         det, sto = sample(params)
         e = _eval[0]
         _eval[0] += 1
 
-        # Each rollout is (qpos, qvel, done, reward); idx 0 = deterministic,
-        # 1..K = the stochastic batch (peel off its leading [K] axis).
+        # Each rollout is (qpos, qvel, done, reward, terms); idx 0 = deterministic,
+        # 1..K = the stochastic batch (peel off its leading [K] axis). `terms` is
+        # [n, len(TERM_NAMES)], the weighted per-term contributions summing to reward.
         det = [np.asarray(a) for a in det]
         sto = [np.asarray(a) for a in sto]
         episodes = [(*[a for a in det], "deterministic")]
@@ -183,17 +212,17 @@ def run(cfg: Cfg, ctx: RunContext):
 
         results = ctx.out / "results"
         results.mkdir(parents=True, exist_ok=True)
-        for idx, (qpos, qvel, done, reward, kind) in enumerate(episodes):
+        for idx, (qpos, qvel, done, reward, terms, kind) in enumerate(episodes):
             np.savez(
                 results / f"sample_episode_{e:03d}_{idx}.npz",
                 qpos=qpos, qvel=qvel, done=done,
-                reward=reward,
+                reward=reward, reward_terms=terms, term_names=np.asarray(term_names),
                 timestep=env.control_dt, model=str(MODEL.relative_to(ROOT)),
                 step=int(step), kind=kind, cmd_vx=cfg.vx, z_min=z_min,
             )
         plot = results / f"sample_episodes_{e:03d}.png"
         plot_episodes(
-            [(q, v, k) for q, v, _d, _r, k in episodes], out=plot,
+            [(q, v, k) for q, v, _d, _r, _t, k in episodes], out=plot,
             control_dt=env.control_dt, cmd_vx=cfg.vx, z_min=z_min, step=int(step))
 
         console.print(

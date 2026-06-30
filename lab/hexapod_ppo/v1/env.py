@@ -112,8 +112,12 @@ class HexapodEnv(Env):
         # observation size (host-side, once).
         self._obs_size = None
         _d = mjx.forward(self.model, mjx.make_data(self.model))
-        _obs = _observe(self, State(_d, None, jnp.zeros(()), jnp.zeros(()), {}, {"last_action": jnp.zeros(self._nu), "contact": jnp.zeros(len(self.feet)), "load": jnp.zeros(len(self.feet))}))
+
+        _empty_state = State(_d, None, jnp.zeros(()), jnp.zeros(()), {}, {"last_action": jnp.zeros(self._nu), "contact": jnp.zeros(len(self.feet), dtype=bool), "load": jnp.zeros(len(self.feet))})
+        _obs = _observe(self, _empty_state)
         self._obs_size = int(_obs.shape[0])
+        _,(_rs, *_) = _reward(self, _empty_state, jnp.zeros(self._nu), _empty_state)
+        self._reward_terms = list(_rs.keys())  # the reward term names, for logging
 
     # --- Brax Env API ---
     @property
@@ -152,9 +156,12 @@ class HexapodEnv(Env):
             "contact": contact,
             "load": load,}
 
-        # NOTE: metric and info have to have the same structure as 
-        # the ones in step() so that the scan carry pytree matches reset()'s. 
-        state = State(data, None, 0.0, 0.0, {}, info)
+        # metrics must carry the same keys step() writes (one per reward term),
+        # zeroed, so the scan carry pytree is invariant and brax's EvalWrapper can
+        # accumulate them. Keyed off the actual reward terms (self._reward_terms);
+        # step() update()s these in place (brax convention) rather than rebuilding.
+        metrics = {f"reward/{k}": jnp.zeros(()) for k in self._reward_terms}
+        state = State(data, None, 0.0, 0.0, metrics, info)
         obs = _observe(self, state)
         state = state.replace(obs=obs)
         return state
@@ -189,15 +196,17 @@ class HexapodEnv(Env):
             "last_action": action  # the action that got me here
         }
 
-        # Not reporting per-term metrics for now. Carry the incoming metrics dict
-        # through unchanged so the scan carry pytree stays invariant: our reset()
-        # emits {}, but brax wrappers (e.g. EvalWrapper) inject their own keys and
-        # expect step() to preserve them.
-        state_next = State(data, None, None, done.astype(jnp.float32), state.metrics, info_next)
+        # Carry the incoming metrics dict through and update our term values in
+        # place (brax convention, see ant.py): this preserves the key set across
+        # the scan carry, including keys the wrappers inject (e.g. EvalWrapper's
+        # "reward"), instead of rebuilding the dict and dropping them.
+        state_next = State(data, None, None, done.astype(jnp.float32), dict(state.metrics), info_next)
 
         obs = _observe(self, state_next)
         reward, (terms, ) = _reward(self, state, action, state_next)
 
+        state_next.metrics.update(
+            {f"reward/{k}": v for k, v in terms.items()})
         state_next = state_next.replace(obs=obs, reward=reward)
 
         return state_next
