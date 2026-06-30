@@ -306,7 +306,8 @@ def _reward(env: HexapodEnv, state: State, action: jax.Array, state_next: State)
     # Guard the empty mask: with <2 feet in sustained contact (e.g. a flight
     # phase), jnp.var divides by 0 -> NaN. Variance needs >=2 samples anyway.
     sustained = contact & last_contact
-    load_var = jnp.where(jnp.sum(sustained) > 1, jnp.var(load, where=sustained), 0.0)
+    load_normalized = jnp.where(sustained, load / jnp.sum(load), 0.0)
+    load_var = jnp.where(jnp.sum(sustained) > 1, jnp.var(load_normalized, where=sustained), 0.0)
     rs["load_var"] = - load_var
 
     # TERM: Slip
