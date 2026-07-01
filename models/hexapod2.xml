@@ -8,11 +8,11 @@
        18 actuated DOF. Segment lengths are pure leg-local +x lengths at the zero
        pose; the standing rest pose lives in <keyframe name="home">. -->
   <default>
-    <geom density="660" friction="1.0 0.5 0.5" contype="0" conaffinity="1"/>
+    <geom density="3000" friction="1.0 0.5 0.5" contype="0" conaffinity="1"/>
     <default class="hexapod">
       <joint type="hinge" armature="0.008" damping="0.4" frictionloss="0.02"/>
       <geom type="capsule" size="0.015"/>
-      <position kp="200" kv="6" forcerange="-8 8"/>
+      <position kp="200" kv="6" forcerange="-15 15"/>
       <default class="coxa">
         <joint axis="0 0 1" range="-45 45"/>
         <geom material="coxa"/>
@@ -58,11 +58,11 @@
   <worldbody>
     <light pos="0 0 2.0" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
     <geom name="floor" type="plane" size="0 0 0.05" material="grid" contype="1" conaffinity="1"
-          priority="1" friction="2 0.5 0.5"/>
+          priority="1" friction="2.0 0.5 0.5"/>
 
-    <body name="base" pos="0 0 0.241185">
+    <body name="base" pos="0 0 0.309334">
       <freejoint name="root"/>
-      <geom name="base" type="mesh" mesh="hexbody" material="base" density="2770"/>
+      <geom name="base" type="mesh" mesh="hexbody" material="base" density="6000"/>
       <geom name="head" type="box" pos="0.1125 0 0.0125" size="0.02 0.03 0.02" material="head"/>
 
       <!-- 6 legs, one per corner. Index -> corner:
@@ -70,85 +70,85 @@
              3 = BR (210)  4 = MR (270)  5 = FR (330) -->
       <body name="coxa0" pos="0.129904 0.075 0" euler="0 0 30" childclass="hexapod">
         <joint name="coxa0" class="coxa"/>
-        <geom class="coxa" fromto="0 0 0 0.025 0 0"/>
-        <body name="femur0" pos="0.025 0 0">
+        <geom class="coxa" fromto="0 0 0 0.026 0 0"/>
+        <body name="femur0" pos="0.026 0 0">
           <joint name="femur0" class="femur"/>
-          <geom class="femur" fromto="0 0 0 0.2 0 0"/>
-          <body name="tibia0" pos="0.2 0 0">
+          <geom class="femur" fromto="0 0 0 0.15 0 0"/>
+          <body name="tibia0" pos="0.15 0 0">
             <joint name="tibia0" class="tibia"/>
-            <geom class="tibia" fromto="0 0 0 0.206 0 0"/>
-            <geom name="foot0" type="sphere" pos="0.206 0 0" size="0.025" density="1810" material="foot"/>
-            <site name="foot0" pos="0.206 0 0" size="0.012"/>
+            <geom class="tibia" fromto="0 0 0 0.245 0 0"/>
+            <geom name="foot0" type="sphere" pos="0.245 0 0" size="0.02" density="600" material="foot"/>
+            <site name="foot0" pos="0.245 0 0" size="0.012"/>
           </body>
         </body>
       </body>
       <body name="coxa1" pos="9.18485e-18 0.15 0" euler="0 0 90" childclass="hexapod">
         <joint name="coxa1" class="coxa"/>
-        <geom class="coxa" fromto="0 0 0 0.025 0 0"/>
-        <body name="femur1" pos="0.025 0 0">
+        <geom class="coxa" fromto="0 0 0 0.026 0 0"/>
+        <body name="femur1" pos="0.026 0 0">
           <joint name="femur1" class="femur"/>
-          <geom class="femur" fromto="0 0 0 0.2 0 0"/>
-          <body name="tibia1" pos="0.2 0 0">
+          <geom class="femur" fromto="0 0 0 0.15 0 0"/>
+          <body name="tibia1" pos="0.15 0 0">
             <joint name="tibia1" class="tibia"/>
-            <geom class="tibia" fromto="0 0 0 0.206 0 0"/>
-            <geom name="foot1" type="sphere" pos="0.206 0 0" size="0.025" density="1810" material="foot"/>
-            <site name="foot1" pos="0.206 0 0" size="0.012"/>
+            <geom class="tibia" fromto="0 0 0 0.245 0 0"/>
+            <geom name="foot1" type="sphere" pos="0.245 0 0" size="0.02" density="600" material="foot"/>
+            <site name="foot1" pos="0.245 0 0" size="0.012"/>
           </body>
         </body>
       </body>
       <body name="coxa2" pos="-0.129904 0.075 0" euler="0 0 150" childclass="hexapod">
         <joint name="coxa2" class="coxa"/>
-        <geom class="coxa" fromto="0 0 0 0.025 0 0"/>
-        <body name="femur2" pos="0.025 0 0">
+        <geom class="coxa" fromto="0 0 0 0.026 0 0"/>
+        <body name="femur2" pos="0.026 0 0">
           <joint name="femur2" class="femur"/>
-          <geom class="femur" fromto="0 0 0 0.2 0 0"/>
-          <body name="tibia2" pos="0.2 0 0">
+          <geom class="femur" fromto="0 0 0 0.15 0 0"/>
+          <body name="tibia2" pos="0.15 0 0">
             <joint name="tibia2" class="tibia"/>
-            <geom class="tibia" fromto="0 0 0 0.206 0 0"/>
-            <geom name="foot2" type="sphere" pos="0.206 0 0" size="0.025" density="1810" material="foot"/>
-            <site name="foot2" pos="0.206 0 0" size="0.012"/>
+            <geom class="tibia" fromto="0 0 0 0.245 0 0"/>
+            <geom name="foot2" type="sphere" pos="0.245 0 0" size="0.02" density="600" material="foot"/>
+            <site name="foot2" pos="0.245 0 0" size="0.012"/>
           </body>
         </body>
       </body>
       <body name="coxa3" pos="-0.129904 -0.075 0" euler="0 0 210" childclass="hexapod">
         <joint name="coxa3" class="coxa"/>
-        <geom class="coxa" fromto="0 0 0 0.025 0 0"/>
-        <body name="femur3" pos="0.025 0 0">
+        <geom class="coxa" fromto="0 0 0 0.026 0 0"/>
+        <body name="femur3" pos="0.026 0 0">
           <joint name="femur3" class="femur"/>
-          <geom class="femur" fromto="0 0 0 0.2 0 0"/>
-          <body name="tibia3" pos="0.2 0 0">
+          <geom class="femur" fromto="0 0 0 0.15 0 0"/>
+          <body name="tibia3" pos="0.15 0 0">
             <joint name="tibia3" class="tibia"/>
-            <geom class="tibia" fromto="0 0 0 0.206 0 0"/>
-            <geom name="foot3" type="sphere" pos="0.206 0 0" size="0.025" density="1810" material="foot"/>
-            <site name="foot3" pos="0.206 0 0" size="0.012"/>
+            <geom class="tibia" fromto="0 0 0 0.245 0 0"/>
+            <geom name="foot3" type="sphere" pos="0.245 0 0" size="0.02" density="600" material="foot"/>
+            <site name="foot3" pos="0.245 0 0" size="0.012"/>
           </body>
         </body>
       </body>
       <body name="coxa4" pos="-2.75546e-17 -0.15 0" euler="0 0 270" childclass="hexapod">
         <joint name="coxa4" class="coxa"/>
-        <geom class="coxa" fromto="0 0 0 0.025 0 0"/>
-        <body name="femur4" pos="0.025 0 0">
+        <geom class="coxa" fromto="0 0 0 0.026 0 0"/>
+        <body name="femur4" pos="0.026 0 0">
           <joint name="femur4" class="femur"/>
-          <geom class="femur" fromto="0 0 0 0.2 0 0"/>
-          <body name="tibia4" pos="0.2 0 0">
+          <geom class="femur" fromto="0 0 0 0.15 0 0"/>
+          <body name="tibia4" pos="0.15 0 0">
             <joint name="tibia4" class="tibia"/>
-            <geom class="tibia" fromto="0 0 0 0.206 0 0"/>
-            <geom name="foot4" type="sphere" pos="0.206 0 0" size="0.025" density="1810" material="foot"/>
-            <site name="foot4" pos="0.206 0 0" size="0.012"/>
+            <geom class="tibia" fromto="0 0 0 0.245 0 0"/>
+            <geom name="foot4" type="sphere" pos="0.245 0 0" size="0.02" density="600" material="foot"/>
+            <site name="foot4" pos="0.245 0 0" size="0.012"/>
           </body>
         </body>
       </body>
       <body name="coxa5" pos="0.129904 -0.075 0" euler="0 0 330" childclass="hexapod">
         <joint name="coxa5" class="coxa"/>
-        <geom class="coxa" fromto="0 0 0 0.025 0 0"/>
-        <body name="femur5" pos="0.025 0 0">
+        <geom class="coxa" fromto="0 0 0 0.026 0 0"/>
+        <body name="femur5" pos="0.026 0 0">
           <joint name="femur5" class="femur"/>
-          <geom class="femur" fromto="0 0 0 0.2 0 0"/>
-          <body name="tibia5" pos="0.2 0 0">
+          <geom class="femur" fromto="0 0 0 0.15 0 0"/>
+          <body name="tibia5" pos="0.15 0 0">
             <joint name="tibia5" class="tibia"/>
-            <geom class="tibia" fromto="0 0 0 0.206 0 0"/>
-            <geom name="foot5" type="sphere" pos="0.206 0 0" size="0.025" density="1810" material="foot"/>
-            <site name="foot5" pos="0.206 0 0" size="0.012"/>
+            <geom class="tibia" fromto="0 0 0 0.245 0 0"/>
+            <geom name="foot5" type="sphere" pos="0.245 0 0" size="0.02" density="600" material="foot"/>
+            <site name="foot5" pos="0.245 0 0" size="0.012"/>
           </body>
         </body>
       </body>
@@ -177,6 +177,6 @@
   </actuator>
 
   <keyframe>
-    <key name="home" qpos="0 0 0.241185 1 0 0 0  0 0.0523599 1.46608  0 0.0523599 1.46608  0 0.0523599 1.46608  0 0.0523599 1.46608  0 0.0523599 1.46608  0 0.0523599 1.46608"/>
+    <key name="home" qpos="0 0 0.309334 1 0 0 0  0 0.331613 1.0472  0 0.331613 1.0472  0 0.331613 1.0472  0 0.331613 1.0472  0 0.331613 1.0472  0 0.331613 1.0472"/>
   </keyframe>
 </mujoco>

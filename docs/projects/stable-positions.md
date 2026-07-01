@@ -4,3 +4,6 @@ Find "all" stable tripod positions for a hexapod; maybe  define a rest positions
 
 From here we can also explore, given a stable position what are the ways I can move my body given the stable foot placement constraint; e.g. can I pull myself up to place my free legs or reach/enable/prepare the next stable position. 
 
+One Idea would be to build an "alphabet" of stable positions. Then form a graph where the positions are the vertices and they are connected by an edge if you can stably move from one to the other; given some constraints, feet on a common floor plane or so. Then we can search in that space easily. 
+
+What are ways to generate robot poses given some constraints (e.g. given planted feet); it should be quick. 
