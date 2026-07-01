@@ -32,8 +32,8 @@ tracks what is wired into `compute_reward` today vs. still pending.
 
 | Term | Kind | Formula | Default w | Status |
 |---|---|---|---|---|
-| `lin_vel` | reward | `exp(-‖v_xy_cmd − v_xy‖² / 0.25)` | `1.0` | ✅ slice 1 |
-| `ang_vel` | reward | `exp(-(yaw_cmd − yaw_rate)² / 0.25)` | `0.5` | ✅ slice 1 |
+| `tracking_lin_vel` | reward | `exp(-‖v_xy_cmd − v_xy‖² / 0.25)` | `1.0` | ✅ slice 1 |
+| `tracking_ang_vel` | reward | `exp(-(yaw_cmd − yaw_rate)² / 0.25)` | `0.5` | ✅ slice 1 |
 | `base_height` | reward | `exp(-(z − z_target)² / 0.0025)`, `z_target` = model home height (off if `None`) | `1.0` | ✅ |
 | `lin_vel_z` | penalty | `v_z²` (base frame) | `-2.0` | ✅ slice 1 |
 | `ang_vel_xy` | penalty | `roll_rate² + pitch_rate²` | `-0.05` | ✅ slice 1 |
@@ -139,7 +139,7 @@ $$r_t = R(s_t, a_t, s_{t+1})$$
 
 
 TABLE I:Reward terms for task tracking, style, and penalty.
-
+	 
 |                |                       |                                       |
 | -------------- | --------------------- | ------------------------------------- |
 | **Term**       | **Annotation**        | **Equation**                          |

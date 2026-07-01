@@ -8,6 +8,8 @@ vx: 0.3                     # commanded forward speed (m/s)
 # --- control / sim ---
 decimation: 10             # sim steps per control step (0.04 s control dt)
 action_scale: 0.25         # ctrl = clip(rest + action_scale * action, joint range) [rad]
+kp: 200.0                  # position-servo P gain (overrides model <position kp>)
+kv: 15.0                   # position-servo D gain: velocity damping (slower, smoother swing)
 episode_length: 100        # max control steps per episode
 reset_joint_noise: 0.05    # uniform rad noise on initial joint angles
 keyframe: home             # model <keyframe>: reset pose, action-offset center, nominal height
@@ -16,8 +18,8 @@ keyframe: home             # model <keyframe>: reset pose, action-offset center,
 contact_force_thresh: .05
 
 reward_weights:
-    lin_vel: 1.0
-    ang_vel: 0.5
+    tracking_lin_vel: 1.0
+    tracking_ang_vel: 0.5
     base_height: 1.0
     lin_vel_z: 1.0
     ang_vel_xy: 0.08
@@ -27,6 +29,7 @@ reward_weights:
     dof_acc: 1.5e-7
     load_var: 1.0
     feet_slip: 1.0e-2
+    feet_air_time: 1.0
 
 # --- termination (z_nominal is derived from the configured keyframe) ---
 z_min_frac: 0.5            # done if trunk z < z_min_frac * z_nominal

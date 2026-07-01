@@ -19,13 +19,25 @@ Quick local smoke (tiny, just proves the pipeline wires up; won't learn):
 """
 import functools
 import math
+import os
 import pickle
 import time
 from datetime import datetime
 from pathlib import Path
 
 import jax
-import jax.numpy as jnp
+
+# Persistent XLA compilation cache: reuse compiled executables across processes.
+# The cache key is the HLO + input shapes + jax/jaxlib version + device, so a
+# same-config rerun skips the multi-minute training-step compile, and a sweep that
+# varies only *traced* inputs (e.g. reward_weights carried in state.info) still
+# hits it -- baked cfg constants would change the HLO and miss. Shared dir (not the
+# per-run out/) so every run/process reuses it; override with CONTROLKIT_JAX_CACHE.
+_JAX_CACHE = os.environ.get("CONTROLKIT_JAX_CACHE", str(Path.home() / ".cache" / "controlkit" / "jax"))
+jax.config.update("jax_compilation_cache_dir", _JAX_CACHE)
+jax.config.update("jax_persistent_cache_min_entry_size_bytes", -1)   # no size floor
+jax.config.update("jax_persistent_cache_min_compile_time_secs", 1.0)  # only cache the pricey compiles
+
 import mujoco
 import numpy as np
 from rich.console import Console
@@ -40,7 +52,7 @@ from controlkit import ui
 from controlkit.viz import plot_episodes
 
 from .config import Cfg
-from .env import HexapodEnv
+from .env import HexapodEnv, _make_episode_sampler
 
 ROOT = Path(__file__).resolve().parents[3]
 MODEL = ROOT / "models" / "hexapod.xml"
@@ -58,67 +70,6 @@ def _fmt_dur(seconds: float) -> str:
     if m:
         return f"{m}m{sec:02d}s"
     return f"{sec}s"
-
-
-def _make_episode_sampler(env, make_policy, n_steps, seed, n_stochastic):
-    """Build a jitted sampler: ``params -> (det, sto)`` rollouts of ``n_steps``.
-
-    Returns ``(sample, term_names)``. ``sample`` gives one **deterministic** episode
-    from a fixed reset (same initial state every call, so it is comparable across
-    evals) plus ``n_stochastic`` episodes from the *sampling* policy with independent
-    reset + action noise (so they show the exploration spread). All run without
-    auto-reset: a fall is just recorded. Each rollout yields
-    ``(qpos, qvel, done, reward, terms)`` stacked along the time axis (``terms`` is
-    ``[n, len(term_names)]``, the weighted per-term contributions that sum to
-    ``reward``, in ``term_names`` order); the stochastic batch is ``vmap``-ed, so its
-    leaves carry a leading ``[K]`` axis.
-
-    ``term_names`` is the per-term label order, derived from the env's reward metrics
-    keys (``reward/*``) and aligned with the ``terms`` columns. Pulled via
-    ``eval_shape`` (abstract, no device run -- avoids the one-time MJX step compile).
-    """
-    base = jax.random.PRNGKey(seed)
-
-    probe = jax.eval_shape(
-        env.step,
-        jax.eval_shape(env.reset, base),
-        jax.ShapeDtypeStruct((env.action_size,), jnp.float32),
-    )
-    term_names = tuple(
-        p[-1].key[len("reward/"):]
-        for p, _ in jax.tree_util.tree_leaves_with_path(probe.metrics)
-    )
-
-    def rollout(policy, reset_key, act_key):
-        state = env.reset(reset_key)
-
-        def body(carry, _):
-            st, k = carry
-            k, ak = jax.random.split(k)
-            action, _ = policy(st.obs, ak)
-            st = env.step(st, action)
-            ps = st.pipeline_state
-            terms = jnp.stack(jax.tree_util.tree_leaves(st.metrics))  # sorted-key order
-            return (st, k), (ps.qpos, ps.qvel, st.done, st.reward, terms)
-
-        _, out = jax.lax.scan(body, (state, act_key), None, length=n_steps)
-        return out
-
-    @jax.jit
-    def sample(params):
-        det_policy = make_policy(params, deterministic=True)
-        sto_policy = make_policy(params, deterministic=False)
-        det = rollout(det_policy, base, base)                  # fixed reset
-        keys = jax.random.split(jax.random.fold_in(base, 1), n_stochastic)
-
-        def one(k):
-            rk, ak = jax.random.split(k)
-            return rollout(sto_policy, rk, ak)
-
-        sto = jax.vmap(one)(keys)                              # leaves: [K, n, ...]
-        return det, sto
-
-    return sample, term_names
 
 
 @experiment(name="hexapod_ppo_v1")
@@ -195,7 +146,8 @@ def run(cfg: Cfg, ctx: RunContext):
     def save_sample_episode(step, make_policy, params):
         if not _sampler:
             _sampler.append(_make_episode_sampler(
-                env, make_policy, n_sample_steps, cfg.seed, cfg.n_sample_episodes))
+                jax.random.PRNGKey(cfg.seed), env, make_policy,
+                n_sample_steps, cfg.n_sample_episodes))
         sample, term_names = _sampler[0]
         det, sto = sample(params)
         e = _eval[0]

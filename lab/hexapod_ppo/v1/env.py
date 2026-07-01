@@ -70,7 +70,16 @@ class HexapodEnv(Env):
 
     def __init__(self, mj_model: mujoco.MjModel, cfg: Cfg):
         self.cfg = cfg
-        self.model = mjx.put_model(mj_model) 
+
+        # Position-servo gains from config: override the model's kp/kv (set in the
+        # <position> default class) so they're a run knob. MuJoCo encodes a position
+        # actuator as gainprm[0]=kp, biasprm[1]=-kp, biasprm[2]=-kv (per actuator).
+        # Mutates mj_model in place, before put_model bakes it into the MJX model.
+        mj_model.actuator_gainprm[:, 0] = cfg.kp
+        mj_model.actuator_biasprm[:, 1] = -cfg.kp
+        mj_model.actuator_biasprm[:, 2] = -cfg.kv
+
+        self.model = mjx.put_model(mj_model)
         self.ids = HexapodIds(mj_model)
         self.command = Command.straight(cfg.vx)  # fixed forward command
         self.sim_dt = float(mj_model.opt.timestep)
@@ -114,7 +123,7 @@ class HexapodEnv(Env):
         self._obs_size = None
         _d = mjx.forward(self.model, mjx.make_data(self.model))
 
-        _empty_state = State(_d, None, jnp.zeros(()), jnp.zeros(()), {}, {"last_action": jnp.zeros(self._nu), "contact": jnp.zeros(len(self.feet), dtype=bool), "load": jnp.zeros(len(self.feet)), "reward_weights": self._reward_weights()})
+        _empty_state = State(_d, None, jnp.zeros(()), jnp.zeros(()), {}, {"last_action": jnp.zeros(self._nu), "contact": jnp.zeros(len(self.feet), dtype=bool), "load": jnp.zeros(len(self.feet)), "air_time": jnp.zeros(len(self.feet)), "ground_time": jnp.zeros(len(self.feet)), "reward_weights": self._reward_weights()})
         _obs = _observe(self, _empty_state)
         self._obs_size = int(_obs.shape[0])
         _,(_rs, *_) = _reward(self, _empty_state, jnp.zeros(self._nu), _empty_state)
@@ -168,6 +177,8 @@ class HexapodEnv(Env):
             "last_action": jnp.zeros(self._nu),
             "contact": contact,
             "load": load,
+            "air_time": jnp.zeros(len(self.feet)),  # per-foot seconds airborne (0 while in contact)
+            "ground_time": jnp.zeros(len(self.feet)),  # per-foot seconds planted (0 while airborne)
             "reward_weights": self._reward_weights(),}
 
         # metrics must carry the same keys step() writes (one per reward term),
@@ -198,15 +209,23 @@ class HexapodEnv(Env):
             return mjx.step(self.model, d.replace(ctrl=ctrl)), None
         data, _ = jax.lax.scan(sim, state.pipeline_state, None, length=self.cfg.decimation)
         contact, load = get_contact_loads(data, self.feet)
+        # per-foot dwell timers: air_time accumulates control_dt while off the
+        # ground (0 on contact), ground_time accumulates while planted (0 airborne).
+        # The [t] value in state.info is the pre-switch duration; _reward reads it
+        # + contact[t+1] to detect touch-down (air->ground) / lift-off (ground->air).
+        air_time = jnp.where(contact, 0.0, state.info["air_time"] + self.control_dt)
+        ground_time = jnp.where(contact, state.info["ground_time"] + self.control_dt, 0.0)
         up = projected_gravity(data, self.ids.base, self.world_up)[2]
         done = (data.qpos[2] < self.cfg.z_min_frac * self.stand_height) | (
             up < self.cfg.up_min
         )
 
         info_next = {
-            **state.info, 
-            "contact": contact, 
-            "load": load,         
+            **state.info,
+            "contact": contact,
+            "load": load,
+            "air_time": air_time,
+            "ground_time": ground_time,
             "last_action": action  # the action that got me here
         }
 
@@ -281,10 +300,10 @@ def _reward(env: HexapodEnv, state: State, action: jax.Array, state_next: State)
     v_cmd      = cmd.v[:2]
     dotyaw_cmd = cmd.omega[2] 
     dotyaw = omega[2]
-    lin_vel = jnp.exp(-jnp.sum((v_cmd - v[:2]) ** 2) / COMMAD_SIGMA**2)
-    ang_vel = jnp.exp(-((dotyaw_cmd - dotyaw) ** 2) / COMMAD_SIGMA**2)
-    rs["lin_vel"] = lin_vel
-    rs["ang_vel"] = ang_vel
+    tracking_lin_vel = jnp.exp(-jnp.sum((v_cmd - v[:2]) ** 2) / COMMAD_SIGMA**2)
+    tracking_ang_vel = jnp.exp(-((dotyaw_cmd - dotyaw) ** 2) / COMMAD_SIGMA**2)
+    rs["tracking_lin_vel"] = tracking_lin_vel
+    rs["tracking_ang_vel"] = tracking_ang_vel
 
     # TERM: Base Height Keeping
     # --- base height keeping: dense "alive" bonus, 1.0 at the target trunk height,
@@ -328,6 +347,18 @@ def _reward(env: HexapodEnv, state: State, action: jax.Array, state_next: State)
     feet_slip = jnp.sum(jnp.linalg.norm(feet_vel, axis=-1) * load)
     rs["feet_slip"] = - feet_slip
 
+    # TERM: Feet air time
+    # Reward deliberate steps: at each touch-down, credit the swing duration above
+    # air_time_target (encourages real strides, discourages shuffling). Nonzero only
+    # on the touch-down step; gated off when no motion is commanded. air_time[t] is
+    # the pre-touchdown swing (state.info); +control_dt makes it the full swing at
+    # landing. contact = contact[t+1].
+    air_time = state.info["air_time"]
+    first_contact = (air_time > 0.0) & contact
+    cmd_active = jnp.linalg.norm(cmd.v[:2]) > 0.05
+    feet_air_time = jnp.sum((air_time + env.control_dt - env.cfg.air_time_target) * first_contact)
+    rs["feet_air_time"] = feet_air_time * cmd_active
+
     # Weigh and Assemble
     rs = {k: v * ws[k] for k, v in rs.items()}
     total = sum(rs.values())
@@ -337,4 +368,52 @@ def _reward(env: HexapodEnv, state: State, action: jax.Array, state_next: State)
     # TODO: We should add some stability terms.
 
     return total, (rs,)
+
+
+def _make_episode_sampler(key, env: HexapodEnv, make_policy, n_steps, n_stochastic):
+    """Build a jitted sampler: ``params -> (det, sto)`` rollouts of ``n_steps``.
+
+    Returns ``(sample, term_names)``. ``sample`` gives one **deterministic** episode
+    from a fixed reset (same initial state every call, so it is comparable across
+    evals) plus ``n_stochastic`` episodes from the *sampling* policy with independent
+    reset + action noise (so they show the exploration spread). All run without
+    auto-reset: a fall is just recorded. Each rollout yields
+    ``(qpos, qvel, done, reward, terms)`` stacked along the time axis (``terms`` is
+    ``[n, len(term_names)]``, the weighted per-term contributions that sum to
+    ``reward``, in ``term_names`` order); the stochastic batch is ``vmap``-ed, so its
+    leaves carry a leading ``[K]`` axis.
+
+    ``term_names`` is the per-term label order, aligned with the ``terms`` columns.
+    Rollout stacks ``state.metrics`` leaves in sorted-key order, so the labels are
+    just the env's reward-term names sorted the same way.
+    """
+    base = key
+    term_names = tuple(sorted(env._reward_terms))  # sorted-key order, matches metrics leaves
+
+    def rollout(key, policy):
+        reset_key, act_key = jax.random.split(key, 2)
+        state = env.reset(reset_key)
+
+        def body(carry, _):
+            st, k = carry
+            k, ak = jax.random.split(k)
+            action, _ = policy(st.obs, ak)
+            st = env.step(st, action)
+            ps = st.pipeline_state
+            terms = jnp.stack(jax.tree_util.tree_leaves(st.metrics))  # sorted-key order
+            return (st, k), (ps.qpos, ps.qvel, st.done, st.reward, terms)
+
+        _, out = jax.lax.scan(body, (state, act_key), None, length=n_steps)
+        return out
+
+    @jax.jit
+    def sample(params):
+        det_policy = make_policy(params, deterministic=True)
+        sto_policy = make_policy(params, deterministic=False)
+        det = rollout(base, det_policy)  # fixed reset
+        keys = jax.random.split(jax.random.fold_in(base, 1), n_stochastic)
+        sto = jax.vmap(rollout, in_axes=(0, None))(keys, sto_policy)  # leaves: [K, n, ...]
+        return det, sto
+
+    return sample, term_names
 

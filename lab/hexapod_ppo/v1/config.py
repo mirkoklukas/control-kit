@@ -15,8 +15,8 @@ import yaml
 class RewardWeights:
     """One weight per term (weights are positive). """
 
-    lin_vel: float = 1.0
-    ang_vel: float = 0.5
+    tracking_lin_vel: float = 1.0
+    tracking_ang_vel: float = 0.5
     base_height: float = 1.0
     lin_vel_z: float = 2.0
     ang_vel_xy: float = 0.05
@@ -26,6 +26,7 @@ class RewardWeights:
     dof_acc: float = 2.5e-7
     load_var: float = 1.0
     feet_slip: float = 1e-2
+    feet_air_time: float = 1.0
 
     def replace(self, **kw) -> "RewardWeights":
         return dataclasses.replace(self, **kw)
@@ -49,6 +50,11 @@ class Cfg:
     # --- control / sim ---
     decimation: int = 10         # sim steps per control step (0.04 s control dt -> ~25 Hz)
     action_scale: float = 0.25   # ctrl = clip(rest + action_scale * action, joint range) [rad]
+    kp: float = 200.0            # position-servo P gain (overrides model <position kp>)
+    kv: float = 15.0             # position-servo D gain: velocity damping. Raised from the
+                                 # model's 6 to trade snappiness for a slower, smoother swing
+                                 # (powerful -- full torque kept -- but speed-capped). ~halves
+                                 # peak swing speed; >20 over-damps below walking cadence.
     episode_length: int = 100    # max control steps before the episode truncates/resets
     reset_joint_noise: float = 0.05   # uniform rad noise on initial joint angles
     keyframe: str = "home"       # model <keyframe>: reset pose, action-offset center, nominal height (falls back to qpos0)
