@@ -29,7 +29,7 @@ sb3 = ["stable-baselines3>=2.3"]
 # warp-lang silences mujoco's optional Warp-backend import probe (the
 # "Failed to import warp" prints); it does NOT change the backend -- MJX still
 # defaults to JAX unless MJX_GPU_DEFAULT_WARP=true.
-mjx = ["mujoco-mjx==3.9.0", "warp-lang"]
+mjx = ["mujoco-mjx==3.9.0", "warp-lang", "jaxlie>=1.4", "rerun-sdk>=0.20"]
 # PPO training (Brax) on top of MJX. Pulls flax/optax/orbax. Run with
 # `uv run --extra ppo ...`; includes the mjx stack.
 ppo = ["controlkit[mjx]", "brax>=0.10"]

@@ -1,0 +1,110 @@
+<mujoco model="sticky_spheres10_noroll">
+  <option timestep="0.004" integrator="implicitfast" iterations="10" ls_iterations="8"/>
+  <visual>
+    <headlight ambient="0.4 0.4 0.4" diffuse="0.65 0.65 0.65" specular="0.1 0.1 0.1"/>
+    <map haze="0"/>
+  </visual>
+  <asset>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2" width="512" height="512"/>
+    <material name="grid" texture="grid" texrepeat="10 10" reflectance="0"/>
+    <material name="foot" rgba="1 0.258824 0.976471 1"/>
+  </asset>
+  <worldbody>
+    <light pos="0 0 2.0" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid" contype="1" conaffinity="1" priority="1" friction="2 0.5 0.5"/>
+    <geom name="wall" type="plane" pos="1 0 0.6" zaxis="-1 0 0" size="0.8 2 0.05" material="grid" contype="1" conaffinity="1" friction="2 0.5 0.5"/>
+    <body name="foot0" pos="0.975 -0.450 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot0" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot1" pos="0.975 -0.350 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot1" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot2" pos="0.975 -0.250 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot2" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot3" pos="0.975 -0.150 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot3" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot4" pos="0.975 -0.050 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot4" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot5" pos="0.975 0.050 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot5" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot6" pos="0.975 0.150 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot6" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot7" pos="0.975 0.250 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot7" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot8" pos="0.975 0.350 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot8" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+    <body name="foot9" pos="0.975 0.450 0.6">
+      <joint type="slide" axis="1 0 0"/>
+      <joint type="slide" axis="0 1 0"/>
+      <joint type="slide" axis="0 0 1"/>
+      <geom name="foot9" type="sphere" size="0.02" material="foot"
+            contype="0" conaffinity="1" friction="2 0.5 0.5" margin="0.01" gap="0.01"
+            solimp="0.99 0.9999 0.0001 0.5 2"/>
+    </body>
+  </worldbody>
+  <actuator>
+    <adhesion name="stick0" body="foot0" ctrlrange="0 1" gain="0"/>
+    <adhesion name="stick1" body="foot1" ctrlrange="0 1" gain="5"/>
+    <adhesion name="stick2" body="foot2" ctrlrange="0 1" gain="10"/>
+    <adhesion name="stick3" body="foot3" ctrlrange="0 1" gain="20"/>
+    <adhesion name="stick4" body="foot4" ctrlrange="0 1" gain="40"/>
+    <adhesion name="stick5" body="foot5" ctrlrange="0 1" gain="80"/>
+    <adhesion name="stick6" body="foot6" ctrlrange="0 1" gain="160"/>
+    <adhesion name="stick7" body="foot7" ctrlrange="0 1" gain="320"/>
+    <adhesion name="stick8" body="foot8" ctrlrange="0 1" gain="640"/>
+    <adhesion name="stick9" body="foot9" ctrlrange="0 1" gain="1280"/>
+  </actuator>
+</mujoco>

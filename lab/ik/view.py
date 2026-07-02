@@ -9,9 +9,14 @@ Needs a display. On macOS the passive viewer must run under ``mjpython``:
 
     uv run mjpython -m lab.ik.view --planted 0,2,4 --n 20 --hide-other-legs
 
-Options: ``--n`` poses, ``--alpha`` ghost transparency, ``--hide-other-legs`` to
-drop the non-planted legs, ``--seed``, ``--reach`` (box half-widths). Use
-``--dry-run`` to build the scene and print stats without opening a window.
+With ``--step`` it instead animates: the current pose is opaque and each pose it
+leaves behind fades out over ``--fade`` seconds, a new one spawned every ``--dt``
+seconds -- a motion trail through the pose set.
+
+Options: ``--n`` poses, ``--alpha`` overlay opacity, ``--hide-other-legs`` to
+drop the non-planted legs, ``--step``/``--dt``/``--fade`` for the fading
+animation, ``--seed``, ``--reach`` (box half-widths). Use ``--dry-run`` to build
+the scene and print stats without opening a window.
 """
 from __future__ import annotations
 
@@ -62,6 +67,32 @@ def _set_cam(cam):
     cam.distance, cam.azimuth, cam.elevation = 1.1, 120.0, -18.0
 
 
+def _rebuild_trail(scn, model, qpos, trail, t, fade):
+    """Repopulate ``scn`` with the fading trail; return the surviving entries.
+
+    ``trail`` is a list of ``[pose_idx, spawn_time]``. Each pose is drawn with
+    alpha ``1 - age/fade`` (age = ``t - spawn_time``); expired ones are dropped.
+    """
+    opt, pert = no_sites_option(), mujoco.MjvPerturb()
+    tmp = mujoco.MjData(model)
+    scn.ngeom = 0
+    kept = []
+    for idx, ts in trail:
+        a = 1.0 - (t - ts) / fade
+        if a <= 0.0:
+            continue
+        kept.append([idx, ts])
+        start = scn.ngeom
+        tmp.qpos[:] = qpos[idx]
+        mujoco.mj_forward(model, tmp)
+        mujoco.mjv_addGeoms(model, tmp, opt, pert, int(mujoco.mjtCatBit.mjCAT_DYNAMIC), scn)
+        for j in range(start, scn.ngeom):
+            g = scn.geoms[j]
+            if g.objtype == mujoco.mjtObj.mjOBJ_GEOM and model.geom_bodyid[g.objid] != 0:
+                g.rgba[3] = a
+    return kept
+
+
 def _populate_ghosts(scn, model, ghost_qpos, alpha, hide_ids):
     """Append each ghost qpos as robot geoms in ``scn`` and set transparency."""
     opt, pert = no_sites_option(), mujoco.MjvPerturb()
@@ -82,8 +113,11 @@ def main(argv=None):
     p.add_argument("--planted", default="0,2,4", help="planted leg indices, e.g. 0,2,4")
     p.add_argument("--n", type=int, default=20, help="number of poses")
     p.add_argument("--step", action="store_true",
-                   help="cycle poses one at a time on the live robot (instead of overlaying)")
-    p.add_argument("--dt", type=float, default=0.4, help="seconds per pose in --step mode")
+                   help="animate poses with a fading trail (instead of a static overlay)")
+    p.add_argument("--dt", type=float, default=0.15,
+                   help="seconds between new poses in --step mode")
+    p.add_argument("--fade", type=float, default=1.2,
+                   help="seconds for a released pose to fade out in --step mode")
     p.add_argument("--alpha", type=float, default=1.0, help="overlay transparency (1 = opaque)")
     p.add_argument("--hide-other-legs", action="store_true",
                    help="hide non-planted legs and all foot markers")
@@ -115,8 +149,12 @@ def main(argv=None):
     mujoco.mj_forward(model, data)
 
     if args.dry_run:  # headless verification path (no window)
-        if args.step:
-            print(f"dry-run OK: step mode, {len(qpos)} poses @ {args.dt}s")
+        if args.step:  # exercise one full fade-window rebuild
+            scn = mujoco.MjvScene(model, mujoco.viewer._Simulate.MAX_GEOM)
+            n_trail = max(1, int(args.fade / args.dt))
+            trail = [[i % len(qpos), -i * args.dt] for i in range(n_trail)]
+            _rebuild_trail(scn, model, qpos, trail, 0.0, args.fade)
+            print(f"dry-run OK: step fade-trail, ~{n_trail} poses in trail, {scn.ngeom} geoms")
             return
         scn = mujoco.MjvScene(model, mujoco.viewer._Simulate.MAX_GEOM)
         mujoco.mjv_updateScene(model, data, no_sites_option(), None,
@@ -129,13 +167,25 @@ def main(argv=None):
         _set_cam(viewer.cam)
         viewer.opt.sitegroup[:] = 0  # no site markers on the live robot either
         if args.step:
-            k = 0  # cycle poses on the single live robot, looping
+            # Live robot = current pose (opaque); user_scn = fading trail of the
+            # poses just visited. A new pose is released every --dt seconds and
+            # fades to nothing over --fade seconds.
+            n, k = len(qpos), 0
+            data.qpos[:] = qpos[0]
+            mujoco.mj_forward(model, data)
+            trail = []  # [pose_idx, spawn_time]
+            next_spawn = time.perf_counter() + args.dt
             while viewer.is_running():
-                data.qpos[:] = qpos[k % len(qpos)]
-                mujoco.mj_forward(model, data)
+                t = time.perf_counter()
+                if t >= next_spawn:
+                    trail.append([k, t])          # release current into the trail
+                    k = (k + 1) % n
+                    data.qpos[:] = qpos[k]
+                    mujoco.mj_forward(model, data)
+                    next_spawn = t + args.dt
+                trail = _rebuild_trail(viewer.user_scn, model, qpos, trail, t, args.fade)
                 viewer.sync()
-                time.sleep(args.dt)
-                k += 1
+                time.sleep(1.0 / 60.0)
         else:
             _populate_ghosts(viewer.user_scn, model, qpos[1:], args.alpha, hide_ids)
             viewer.sync()
