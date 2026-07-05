@@ -84,7 +84,7 @@ def validate_feet(body, feet):
 
 
 # DON'T TOUCH THIS
-def infer_feet(body, feet):
+def infer_posture(body, feet):
     """Do all 6 legs reach their feet? Reach annulus only, no joint limits.
 
     body : SE3        world body pose.

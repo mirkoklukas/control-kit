@@ -25,6 +25,10 @@ import time
 from datetime import datetime
 from pathlib import Path
 
+# Quiet the XLA/TSL C++ logs (INFO+WARNING) jaxlib prints on import. Read at library
+# init, so it must precede `import jax`; setdefault so an explicit override wins.
+os.environ.setdefault("TF_CPP_MIN_LOG_LEVEL", "2")
+
 import jax
 
 # Persistent XLA compilation cache: reuse compiled executables across processes.

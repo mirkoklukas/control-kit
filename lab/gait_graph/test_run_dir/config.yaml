@@ -1,0 +1,15 @@
+seed: 0
+B: 1000
+S: 5000
+tau: 0.05
+task_vxy:
+- 0.1
+- 0.0
+sigma: 0.3
+T: 20
+select_beta: 4.0
+start_ids:
+- 0
+- 2
+- 4
+body_z: 0.241185

@@ -1,0 +1,209 @@
+"""Visualize the hexapod in rerun from a body pose + per-leg joint angles.
+
+Simple primitives (no mesh): a flat cube for the base, line-strips for the leg
+segments, spheres for the feet. World joint positions come from
+:func:`lab.gg.kinematics.infer_joint_xpos`, so this is pure jax + rerun, no
+MuJoCo.
+
+Three concerns, kept separate:
+  * ``init_viewer(...)`` -- pick the sink (connect / save / spawn) once.
+  * ``log_robot(...)``   -- draw one configuration.
+  * ``log_poses(...)``   -- draw N configurations on a scrubbable timeline.
+
+Run under ``uv run --extra mjx``.
+"""
+from __future__ import annotations
+
+from pathlib import Path
+
+import numpy as np
+import jax.numpy as jnp
+import rerun as rr
+from jaxlie import SE3
+
+from lab.stance_graph.kinematics import infer_joint_xpos, ALL_PLANTED
+
+FREE_COLOR = (90, 90, 90)         # leg segments
+FOOT_FREE_COLOR = (120, 120, 120) # swing feet
+FOOT_STANCE_COLOR = (255, 66, 249)  # planted feet
+
+
+# --------------------------------------------------------------------------- #
+# Connection / sink                                                           #
+# --------------------------------------------------------------------------- #
+def _grpc_url(connect) -> str:
+    """gRPC url from a port int (localhost) or a full url string."""
+    return connect if isinstance(connect, str) else f"rerun+http://127.0.0.1:{int(connect)}/proxy"
+
+
+def init_viewer(app: str = "hexapod", *, spawn=True, save=None, connect=None):
+    """Set up the rerun recording + sink. First set option wins:
+    ``connect`` (port/url of a running viewer), ``save`` (.rrd path), ``spawn``.
+    """
+    rr.init(app)
+    if connect is not None:
+        rr.connect_grpc(_grpc_url(connect))
+    elif save is not None:
+        save = Path(save)
+        save.parent.mkdir(parents=True, exist_ok=True)
+        rr.save(save)
+    elif spawn:
+        rr.spawn()
+    rr.log("/", rr.ViewCoordinates.RIGHT_HAND_Z_UP, static=True)   # z is up
+
+
+# --------------------------------------------------------------------------- #
+# Plotting                                                                    #
+# --------------------------------------------------------------------------- #
+def set_time(i, *, timeline="t"):
+    """Place subsequent logs at sequence index ``i`` on ``timeline``.
+
+    Thin wrapper over ``rr.set_time`` so callers can drive their own timeline
+    (e.g. interleaving ``log_body`` / ``log_robot`` per frame) without importing
+    ``rerun`` directly.
+    """
+    rr.set_time(timeline, sequence=int(i))
+
+
+def log_body(body: SE3, *, entity="world", body_size=(0.2, 0.05, 0.0125)):
+    """Draw just the base: a flat box at the ``body`` pose, no legs."""
+    t = np.asarray(body.translation())
+    q_xyzw = np.asarray(body.rotation().as_quaternion_xyzw())
+    rr.log(f"{entity}/base", rr.Transform3D(translation=t, rotation=rr.Quaternion(xyzw=q_xyzw)))
+    rr.log(f"{entity}/base/box",
+           rr.Boxes3D(half_sizes=[np.array(body_size) / 2.0], fill_mode="solid",
+                      colors=[(200, 200, 200)]))
+
+
+def colors_from_values(values, *, cmap="viridis", vmin=None, vmax=None):
+    """Map scalars ``values`` (N,) to (N, 3) uint8 RGB via a matplotlib colormap.
+
+    ``vmin``/``vmax`` default to the data min/max (constant input -> all mid-map).
+    """
+    import matplotlib
+    from matplotlib.colors import Normalize
+
+    v = np.asarray(values, dtype=float).reshape(-1)
+    lo = v.min() if vmin is None else vmin
+    hi = v.max() if vmax is None else vmax
+    rgba = matplotlib.colormaps[cmap](Normalize(lo, hi)(v))   # (N, 4) float in [0, 1]
+    return (rgba[:, :3] * 255).astype(np.uint8)
+
+
+def log_bodies(bodies: SE3, values=None, *, cmap="viridis", vmin=None, vmax=None,
+               entity="bodies", body_size=(0.20, 0.20, 0.05)):
+    """Draw a stack of body boxes (no legs) at one time, colored by ``values``.
+
+    bodies : SE3 batch (N,)   base poses.
+    values : (N,) or None     per-body scalar mapped through ``cmap`` to RGB
+                              (None -> a flat grey).
+
+    All boxes are logged as a single batched ``Boxes3D`` at ``entity``.
+    """
+    t = np.asarray(bodies.translation())                                 # (N, 3)
+    q_xyzw = np.asarray(bodies.rotation().as_quaternion_xyzw())          # (N, 4)
+    n = t.shape[0]
+    if values is None:
+        colors = np.tile(np.array([160, 160, 160], np.uint8), (n, 1))
+    else:
+        colors = colors_from_values(values, cmap=cmap, vmin=vmin, vmax=vmax)
+    rr.log(entity, rr.Boxes3D(
+        centers=t,
+        half_sizes=np.tile(np.array(body_size) / 2.0, (n, 1)),
+        quaternions=[rr.Quaternion(xyzw=q) for q in q_xyzw],
+        colors=colors,
+        fill_mode="solid",
+    ))
+
+
+def log_robot(body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
+              entity="world", body_size=(0.20, 0.20, 0.05),
+              foot_radius=0.0125, leg_radius=0.005):
+    """Draw one configuration under ``entity``.
+
+    body        : SE3       world pose of the base.
+    theta       : (6, 3)    joint angles [coxa, femur, tibia] per leg.
+    stance      : (F,) int  ids (0..5) of the planted legs; their feet are drawn
+                            in ``FOOT_STANCE_COLOR``, the rest in ``FOOT_FREE_COLOR``.
+    only_stance : bool      if True, draw only the ``stance`` legs.
+    """
+    log_body(body, entity=entity, body_size=body_size)
+
+    xpos = np.asarray(infer_joint_xpos(body, jnp.asarray(theta)))   # (6, 4, 3)
+    stance = np.asarray(stance).astype(int).reshape(-1)
+    planted = set(stance.tolist())
+    legs = stance if only_stance else np.arange(6)
+
+    for fid in legs:
+        fid = int(fid)
+        pts = xpos[fid]                                             # (4, 3): shoulder..foot
+        rr.log(f"{entity}/leg{fid}",
+               rr.LineStrips3D([pts], radii=leg_radius, colors=[FREE_COLOR]))
+        rr.log(f"{entity}/leg{fid}/foot",
+               rr.Points3D(pts[-1:], radii=foot_radius,
+                           colors=[FOOT_STANCE_COLOR if fid in planted else FOOT_FREE_COLOR]))
+
+
+def log_poses(bodies: SE3, thetas, *, timeline="pose", **kw):
+    """Draw N configurations on a scrubbable timeline.
+
+    bodies : SE3 batch (N,)   one base pose per frame.
+    thetas : (N, 6, 3)        per-frame joint angles.
+
+    Each frame is logged at time index i on ``timeline`` (scrub/play in the
+    viewer). Extra kwargs (``stance``, ``only_stance``, ...) forward to
+    :func:`log_robot`. For a simultaneous overlay instead, log to distinct
+    ``entity`` paths.
+    """
+    thetas = jnp.asarray(thetas)
+    for i in range(thetas.shape[0]):
+        set_time(i, timeline=timeline)
+        log_robot(bodies[i], thetas[i], **kw)
+
+
+def log_trajectory(bodies: SE3, thetas, stances, *, timeline="t", **kw):
+    """Draw a trajectory on a scrubbable timeline, with a per-frame stance.
+
+    bodies  : SE3 batch (N,)   one base pose per frame.
+    thetas  : (N, 6, 3)        per-frame joint angles.
+    stances : (N, F) int, or a length-N sequence of (F_i,) int arrays -- the
+              planted leg ids at each frame (F may vary per frame if a sequence).
+
+    Extra kwargs (``only_stance``, ``entity``, ...) forward to :func:`log_robot`.
+    """
+    thetas = jnp.asarray(thetas)
+    for i in range(thetas.shape[0]):
+        set_time(i, timeline=timeline)
+        log_robot(bodies[i], thetas[i], stance=stances[i], **kw)
+
+
+def log_stack(bodies: SE3, thetas, stances=None, *, entity="stack", **kw):
+    """Overlay N configurations at a single time, each on its own entity path.
+
+    bodies  : SE3 batch (N,)   one base pose per robot.
+    thetas  : (N, 6, 3)        per-robot joint angles.
+    stances : (N, F) int / length-N sequence / None   per-robot planted leg ids
+              (None -> all legs planted for every robot).
+
+    Unlike :func:`log_trajectory`, all robots are drawn at once (distinct
+    ``{entity}/{i}`` paths) rather than across a timeline. Extra kwargs
+    (``only_stance``, ``body_size``, ...) forward to :func:`log_robot`.
+    """
+    thetas = jnp.asarray(thetas)
+    for i in range(thetas.shape[0]):
+        stance = ALL_PLANTED if stances is None else stances[i]
+        log_robot(bodies[i], thetas[i], stance=stance, entity=f"{entity}/{i}", **kw)
+
+
+def _demo(connect=8812):
+    init_viewer(connect=connect)
+    n = 8
+    zs = jnp.linspace(0.18, 0.28, n)                                  # sweep body height
+    bodies = SE3.from_translation(jnp.stack([jnp.zeros(n), jnp.zeros(n), zs], axis=-1))
+    thetas = jnp.broadcast_to(jnp.array([0.0, 0.0523599, 1.46608]), (n, 6, 3))
+    log_poses(bodies, thetas, stance=jnp.array([0, 2, 4]))
+    print(f"streamed {n} poses -> rerun on port {connect}")
+
+
+if __name__ == "__main__":
+    _demo()
