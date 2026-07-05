@@ -65,14 +65,14 @@ def set_time(i, *, timeline="t"):
     rr.set_time(timeline, sequence=int(i))
 
 
-def log_body(body: SE3, *, entity="world", body_size=(0.2, 0.05, 0.0125)):
+def log_body(body: SE3, *, color=(200, 200, 200), entity="world", body_size=(0.2, 0.05, 0.0125)):
     """Draw just the base: a flat box at the ``body`` pose, no legs."""
     t = np.asarray(body.translation())
     q_xyzw = np.asarray(body.rotation().as_quaternion_xyzw())
     rr.log(f"{entity}/base", rr.Transform3D(translation=t, rotation=rr.Quaternion(xyzw=q_xyzw)))
     rr.log(f"{entity}/base/box",
            rr.Boxes3D(half_sizes=[np.array(body_size) / 2.0], fill_mode="solid",
-                      colors=[(200, 200, 200)]))
+                      colors=[color]))
 
 
 def colors_from_values(values, *, cmap="viridis", vmin=None, vmax=None):
