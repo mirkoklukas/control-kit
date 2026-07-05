@@ -116,6 +116,49 @@ def log_bodies(bodies: SE3, values=None, *, cmap="viridis", vmin=None, vmax=None
     ))
 
 
+def log_mesh(vertices, faces, *, color=(160, 160, 160), normals=None, entity="mesh"):
+    """Draw a triangle mesh in a single flat color (e.g. a sampling surface).
+
+    Args:
+        vertices: (V, 3) mesh vertices.
+        faces: (F, 3) int triangle vertex indices.
+        color: RGB(A) uint8 color applied to the whole mesh.
+        normals: optional (V, 3) vertex normals (for shading).
+        entity: rerun entity path.
+    """
+    verts = np.asarray(vertices, dtype=np.float32)
+    faces = np.asarray(faces, dtype=np.uint32)
+    color = np.asarray(color, dtype=np.uint8)
+    rr.log(entity, rr.Mesh3D(
+        vertex_positions=verts,
+        triangle_indices=faces,
+        vertex_normals=None if normals is None else np.asarray(normals, np.float32),
+        vertex_colors=np.tile(color, (verts.shape[0], 1)),
+    ))
+
+
+def log_points(points, values=None, *, cmap="viridis", vmin=None, vmax=None,
+               radius=0.01, color=(120, 120, 120), entity="points"):
+    """Draw a point cloud, colored per-point by ``values`` through ``cmap``.
+
+    Args:
+        points: (N, 3) point positions.
+        values: (N,) per-point scalars mapped through ``cmap``; None -> flat ``color``.
+        cmap: matplotlib colormap name.
+        vmin: lower color bound (default data min).
+        vmax: upper color bound (default data max).
+        radius: point radius (metres).
+        color: flat RGB used when ``values`` is None.
+        entity: rerun entity path.
+    """
+    pts = np.asarray(points, dtype=np.float32)
+    if values is None:
+        colors = np.tile(np.asarray(color, np.uint8), (pts.shape[0], 1))
+    else:
+        colors = colors_from_values(values, cmap=cmap, vmin=vmin, vmax=vmax)
+    rr.log(entity, rr.Points3D(pts, radii=radius, colors=colors))
+
+
 def log_robot(body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
               entity="world", body_size=(0.20, 0.20, 0.05),
               foot_radius=0.0125, leg_radius=0.005):
