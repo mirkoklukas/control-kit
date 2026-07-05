@@ -10,8 +10,8 @@ Three concerns, kept separate:
   * ``log_robot(...)``   -- draw one configuration.
   * ``log_poses(...)``   -- draw N configurations on a scrubbable timeline.
 
-``path`` throughout is the rerun entity path passed to ``rr.log`` (e.g.
-``"world/base/box"``); pass it to place a drawing where you want in the tree.
+Every ``log_*`` helper takes the rerun entity ``path`` as its first argument
+(as with ``rr.log(path, ...)``, e.g. ``"world/base/box"``).
 
 Run under ``uv run --extra mjx``.
 """
@@ -68,7 +68,7 @@ def set_time(i, *, timeline="t"):
     rr.set_time(timeline, sequence=int(i))
 
 
-def log_body(body: SE3, *, color=(200, 200, 200), path="world", body_size=(0.2, 0.05, 0.0125)):
+def log_body(path, body: SE3, *, color=(200, 200, 200), body_size=(0.2, 0.05, 0.0125)):
     """Draw just the base: a flat box at the ``body`` pose, no legs."""
     t = np.asarray(body.translation())
     q_xyzw = np.asarray(body.rotation().as_quaternion_xyzw())
@@ -109,23 +109,23 @@ def _hex_prism(radius=0.15, thickness=0.05):
     return verts, np.array(faces, dtype=int)
 
 
-def log_hex(body: SE3, *, color=(200, 200, 200), radius=0.15, thickness=0.05,
-            edge_color=(40, 40, 40), path="world"):
+def log_hex(path, body: SE3, *, color=(200, 200, 200), radius=0.15, thickness=0.05,
+            edge_color=(40, 40, 40)):
     """Draw the hexagonal robot body (a hexagonal prism) at ``body``'s pose.
 
     Args:
+        path: rerun entity path.
         body: SE3 world pose of the base.
         color: RGB(A) uint8 body color.
         radius: hexagon circumradius (metres); default matches the weld0 model.
         thickness: prism thickness in z (metres).
         edge_color: wireframe edge color; None to skip.
-        path: rerun entity path.
     """
     verts, faces = _hex_prism(radius, thickness)
     t = np.asarray(body.translation())
     q_xyzw = np.asarray(body.rotation().as_quaternion_xyzw())
     rr.log(f"{path}/hex", rr.Transform3D(translation=t, rotation=rr.Quaternion(xyzw=q_xyzw)))
-    log_mesh(verts, faces, color=color, edge_color=edge_color, path=f"{path}/hex/body")
+    log_mesh(f"{path}/hex/body", verts, faces, color=color, edge_color=edge_color)
 
 
 def colors_from_values(values, *, cmap="viridis", vmin=None, vmax=None):
@@ -143,10 +143,11 @@ def colors_from_values(values, *, cmap="viridis", vmin=None, vmax=None):
     return (rgba[:, :3] * 255).astype(np.uint8)
 
 
-def log_bodies(bodies: SE3, values=None, *, cmap="viridis", vmin=None, vmax=None,
-               path="bodies", body_size=(0.20, 0.20, 0.05)):
+def log_bodies(path, bodies: SE3, values=None, *, cmap="viridis", vmin=None, vmax=None,
+               body_size=(0.20, 0.20, 0.05)):
     """Draw a stack of body boxes (no legs) at one time, colored by ``values``.
 
+    path   : str              rerun entity path.
     bodies : SE3 batch (N,)   base poses.
     values : (N,) or None     per-body scalar mapped through ``cmap`` to RGB
                               (None -> a flat grey).
@@ -169,11 +170,12 @@ def log_bodies(bodies: SE3, values=None, *, cmap="viridis", vmin=None, vmax=None
     ))
 
 
-def log_mesh(vertices, faces, *, color=(160, 160, 160), normals=None,
-             edge_color=(40, 40, 40), edge_radius=0.002, path="mesh"):
+def log_mesh(path, vertices, faces, *, color=(160, 160, 160), normals=None,
+             edge_color=(40, 40, 40), edge_radius=0.002):
     """Draw a triangle mesh in a single flat color (e.g. a sampling surface).
 
     Args:
+        path: rerun entity path.
         vertices: (V, 3) mesh vertices.
         faces: (F, 3) int triangle vertex indices.
         color: RGB(A) uint8 color applied to the whole mesh.
@@ -181,7 +183,6 @@ def log_mesh(vertices, faces, *, color=(160, 160, 160), normals=None,
         edge_color: RGB(A) color for the triangle edges (wireframe overlay under
             ``{path}/edges``); None to skip drawing edges.
         edge_radius: edge line radius (metres).
-        path: rerun entity path.
     """
     verts = np.asarray(vertices, dtype=np.float32)
     faces = np.asarray(faces, dtype=np.uint32)
@@ -200,11 +201,12 @@ def log_mesh(vertices, faces, *, color=(160, 160, 160), normals=None,
         rr.log(f"{path}/edges", rr.LineStrips3D(segs, radii=edge_radius, colors=ec))
 
 
-def log_points(points, values=None, *, cmap="viridis", vmin=None, vmax=None,
-               radius=0.01, color=(120, 120, 120), path="points"):
+def log_points(path, points, values=None, *, cmap="viridis", vmin=None, vmax=None,
+               radius=0.01, color=(120, 120, 120)):
     """Draw a point cloud, colored per-point by ``values`` through ``cmap``.
 
     Args:
+        path: rerun entity path.
         points: (N, 3) point positions.
         values: (N,) per-point scalars mapped through ``cmap``; None -> flat ``color``.
         cmap: matplotlib colormap name.
@@ -212,7 +214,6 @@ def log_points(points, values=None, *, cmap="viridis", vmin=None, vmax=None,
         vmax: upper color bound (default data max).
         radius: point radius (metres).
         color: flat RGB used when ``values`` is None.
-        path: rerun entity path.
     """
     pts = np.asarray(points, dtype=np.float32)
     if values is None:
@@ -222,12 +223,12 @@ def log_points(points, values=None, *, cmap="viridis", vmin=None, vmax=None,
     rr.log(path, rr.Points3D(pts, radii=radius, colors=colors))
 
 
-def log_spheres(centers, radii, values=None, colors=None, *, cmap="viridis",
-                vmin=None, vmax=None, color=(120, 120, 120), fill_mode="solid",
-                path="spheres"):
+def log_spheres(path, centers, radii, values=None, colors=None, *, cmap="viridis",
+                vmin=None, vmax=None, color=(120, 120, 120), fill_mode="solid"):
     """Draw solid spheres, colored by explicit ``colors`` or ``values`` via ``cmap``.
 
     Args:
+        path: rerun entity path.
         centers: (N, 3) sphere centers.
         radii: (N,) or scalar sphere radii (metres).
         values: (N,) per-sphere scalars mapped through ``cmap`` (ignored if
@@ -239,7 +240,6 @@ def log_spheres(centers, radii, values=None, colors=None, *, cmap="viridis",
         vmax: upper color bound (default data max).
         color: flat RGB used when neither ``colors`` nor ``values`` is given.
         fill_mode: rerun fill mode ("solid" or "majorwireframe").
-        path: rerun entity path.
     """
     c = np.asarray(centers, dtype=np.float32)
     n = c.shape[0]
@@ -257,18 +257,18 @@ def log_spheres(centers, radii, values=None, colors=None, *, cmap="viridis",
                                  fill_mode=fill_mode))
 
 
-def log_robot(body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
-              path="world", body_size=(0.20, 0.20, 0.05),
-              foot_radius=0.0125, leg_radius=0.005):
+def log_robot(path, body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
+              body_size=(0.20, 0.20, 0.05), foot_radius=0.0125, leg_radius=0.005):
     """Draw one configuration under ``path``.
 
+    path        : str       rerun entity path.
     body        : SE3       world pose of the base.
     theta       : (6, 3)    joint angles [coxa, femur, tibia] per leg.
     stance      : (F,) int  ids (0..5) of the planted legs; their feet are drawn
                             in ``FOOT_STANCE_COLOR``, the rest in ``FOOT_FREE_COLOR``.
     only_stance : bool      if True, draw only the ``stance`` legs.
     """
-    log_body(body, path=path, body_size=body_size)
+    log_body(path, body, body_size=body_size)
 
     xpos = np.asarray(infer_joint_xpos(body, jnp.asarray(theta)))   # (6, 4, 3)
     stance = np.asarray(stance).astype(int).reshape(-1)
@@ -285,42 +285,44 @@ def log_robot(body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
                            colors=[FOOT_STANCE_COLOR if fid in planted else FOOT_FREE_COLOR]))
 
 
-def log_poses(bodies: SE3, thetas, *, timeline="pose", **kw):
-    """Draw N configurations on a scrubbable timeline.
+def log_poses(path, bodies: SE3, thetas, *, timeline="pose", **kw):
+    """Draw N configurations under ``path`` on a scrubbable timeline.
 
+    path   : str              rerun entity path.
     bodies : SE3 batch (N,)   one base pose per frame.
     thetas : (N, 6, 3)        per-frame joint angles.
 
     Each frame is logged at time index i on ``timeline`` (scrub/play in the
     viewer). Extra kwargs (``stance``, ``only_stance``, ...) forward to
-    :func:`log_robot`. For a simultaneous overlay instead, log to distinct
-    ``path`` values.
+    :func:`log_robot`. For a simultaneous overlay instead, use distinct paths.
     """
     thetas = jnp.asarray(thetas)
     for i in range(thetas.shape[0]):
         set_time(i, timeline=timeline)
-        log_robot(bodies[i], thetas[i], **kw)
+        log_robot(path, bodies[i], thetas[i], **kw)
 
 
-def log_trajectory(bodies: SE3, thetas, stances, *, timeline="t", **kw):
-    """Draw a trajectory on a scrubbable timeline, with a per-frame stance.
+def log_trajectory(path, bodies: SE3, thetas, stances, *, timeline="t", **kw):
+    """Draw a trajectory under ``path`` on a scrubbable timeline, per-frame stance.
 
+    path    : str              rerun entity path.
     bodies  : SE3 batch (N,)   one base pose per frame.
     thetas  : (N, 6, 3)        per-frame joint angles.
     stances : (N, F) int, or a length-N sequence of (F_i,) int arrays -- the
               planted leg ids at each frame (F may vary per frame if a sequence).
 
-    Extra kwargs (``only_stance``, ``path``, ...) forward to :func:`log_robot`.
+    Extra kwargs (``only_stance``, ...) forward to :func:`log_robot`.
     """
     thetas = jnp.asarray(thetas)
     for i in range(thetas.shape[0]):
         set_time(i, timeline=timeline)
-        log_robot(bodies[i], thetas[i], stance=stances[i], **kw)
+        log_robot(path, bodies[i], thetas[i], stance=stances[i], **kw)
 
 
-def log_stack(bodies: SE3, thetas, stances=None, *, path="stack", **kw):
-    """Overlay N configurations at a single time, each on its own entity path.
+def log_stack(path, bodies: SE3, thetas, stances=None, **kw):
+    """Overlay N configurations at a single time, each on its own sub-path.
 
+    path    : str              base rerun entity path.
     bodies  : SE3 batch (N,)   one base pose per robot.
     thetas  : (N, 6, 3)        per-robot joint angles.
     stances : (N, F) int / length-N sequence / None   per-robot planted leg ids
@@ -333,7 +335,7 @@ def log_stack(bodies: SE3, thetas, stances=None, *, path="stack", **kw):
     thetas = jnp.asarray(thetas)
     for i in range(thetas.shape[0]):
         stance = ALL_PLANTED if stances is None else stances[i]
-        log_robot(bodies[i], thetas[i], stance=stance, path=f"{path}/{i}", **kw)
+        log_robot(f"{path}/{i}", bodies[i], thetas[i], stance=stance, **kw)
 
 
 def _demo(connect=8812):
@@ -342,7 +344,7 @@ def _demo(connect=8812):
     zs = jnp.linspace(0.18, 0.28, n)                                  # sweep body height
     bodies = SE3.from_translation(jnp.stack([jnp.zeros(n), jnp.zeros(n), zs], axis=-1))
     thetas = jnp.broadcast_to(jnp.array([0.0, 0.0523599, 1.46608]), (n, 6, 3))
-    log_poses(bodies, thetas, stance=jnp.array([0, 2, 4]))
+    log_poses("world", bodies, thetas, stance=jnp.array([0, 2, 4]))
     print(f"streamed {n} poses -> rerun on port {connect}")
 
 
