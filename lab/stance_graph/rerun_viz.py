@@ -116,7 +116,8 @@ def log_bodies(bodies: SE3, values=None, *, cmap="viridis", vmin=None, vmax=None
     ))
 
 
-def log_mesh(vertices, faces, *, color=(160, 160, 160), normals=None, entity="mesh"):
+def log_mesh(vertices, faces, *, color=(160, 160, 160), normals=None,
+             edge_color=(40, 40, 40), edge_radius=0.002, entity="mesh"):
     """Draw a triangle mesh in a single flat color (e.g. a sampling surface).
 
     Args:
@@ -124,6 +125,9 @@ def log_mesh(vertices, faces, *, color=(160, 160, 160), normals=None, entity="me
         faces: (F, 3) int triangle vertex indices.
         color: RGB(A) uint8 color applied to the whole mesh.
         normals: optional (V, 3) vertex normals (for shading).
+        edge_color: RGB(A) color for the triangle edges (wireframe overlay under
+            ``{entity}/edges``); None to skip drawing edges.
+        edge_radius: edge line radius (metres).
         entity: rerun entity path.
     """
     verts = np.asarray(vertices, dtype=np.float32)
@@ -135,6 +139,12 @@ def log_mesh(vertices, faces, *, color=(160, 160, 160), normals=None, entity="me
         vertex_normals=None if normals is None else np.asarray(normals, np.float32),
         vertex_colors=np.tile(color, (verts.shape[0], 1)),
     ))
+    if edge_color is not None:
+        e = np.concatenate([faces[:, [0, 1]], faces[:, [1, 2]], faces[:, [2, 0]]], axis=0)
+        e = np.unique(np.sort(e, axis=1), axis=0)              # unique undirected edges
+        segs = verts[e]                                        # (E, 2, 3)
+        ec = np.tile(np.asarray(edge_color, np.uint8), (segs.shape[0], 1))
+        rr.log(f"{entity}/edges", rr.LineStrips3D(segs, radii=edge_radius, colors=ec))
 
 
 def log_points(points, values=None, *, cmap="viridis", vmin=None, vmax=None,
