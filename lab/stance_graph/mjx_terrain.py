@@ -11,6 +11,11 @@ are skipped automatically. The floor plane is infinite, so it is bounded to the
 so the pool concentrates on the climb corridor (floor near the robot + the near
 face of the box at x=1), not the far/underside faces.
 
+For arbitrary/steppable terrain, ``plane``/``box``/``mesh`` geoms are all
+tessellated, so a terrain **mesh** in the model XML is sampled directly:
+``pool_from_geom(model_xml, "terrain")`` area-samples a single named geom with no
+region clip. ``build_pool(region=None)`` does the same over all world-body geoms.
+
 Run under ``uv run --extra mjx`` (needs only mujoco + numpy).
 """
 from __future__ import annotations
@@ -82,21 +87,38 @@ def _mesh_triangles(model, g, pos, R):
     return tris, n
 
 
-def scene_triangles(model_path=MODEL, region=REGION):
-    """World-space triangle soup (+ normals) of the terrain geoms in the scene."""
+def scene_triangles(model_path=MODEL, region=REGION, geom_names=None):
+    """World-space triangle soup (+ normals) of terrain geoms in the scene.
+
+    geom_names : None -> every world-body geom; else a list of geom names to use
+                 (any body), e.g. a single ``"terrain"`` mesh geom.
+    region     : bounds the (infinite) plane rectangle. If ``None``, planes are
+                 skipped (they can't be area-sampled unbounded); meshes/boxes are
+                 unaffected.
+    """
     model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(model)
     mujoco.mj_forward(model, data)                              # world geom poses
 
+    if geom_names is not None:
+        gids = []
+        for n in geom_names:
+            g = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, n)
+            if g < 0:
+                raise ValueError(f"no geom named {n!r} in {model_path}")
+            gids.append(g)
+    else:
+        gids = [g for g in range(model.ngeom) if model.geom_bodyid[g] == 0]
+
     tris, normals = [], []
-    for g in range(model.ngeom):
-        if model.geom_bodyid[g] != 0:                          # world body only
-            continue
+    for g in gids:
         pos = data.geom_xpos[g].copy()
         R = data.geom_xmat[g].reshape(3, 3).copy()
         gtype = model.geom_type[g]
         if gtype == mujoco.mjtGeom.mjGEOM_PLANE:
-            t, n = _plane_triangles(pos, R, region)
+            if region is None:
+                continue                                       # unbounded -> skip
+            t, n = _plane_triangles(pos, R, np.asarray(region))
         elif gtype == mujoco.mjtGeom.mjGEOM_BOX:
             t, n = _box_triangles(pos, R, model.geom_size[g])
         elif gtype == mujoco.mjtGeom.mjGEOM_MESH:
@@ -104,6 +126,8 @@ def scene_triangles(model_path=MODEL, region=REGION):
         else:
             continue
         tris.append(t); normals.append(n)
+    if not tris:
+        raise ValueError("no tessellable terrain geoms selected")
     return np.concatenate(tris), np.concatenate(normals)
 
 
@@ -122,16 +146,21 @@ def _sample_tris(rng, tris, normals, n):
     return pts, normals[idx]
 
 
-def build_pool(model_path=MODEL, M=20000, region=REGION, seed=0, oversample=4):
-    """Area-uniform pool of ``M`` surface points inside ``region``.
+def build_pool(model_path=MODEL, M=20000, region=REGION, geom_names=None, seed=0, oversample=4):
+    """Area-uniform pool of ``M`` surface points (+ normals) over the terrain.
 
-    Returns ``(xyz (M, 3), normal (M, 3))``. Points are reject-sampled against
-    ``region`` so faces poking outside the AABB (box top, far/side faces) drop out.
+    Returns ``(xyz (M, 3), normal (M, 3))``. With ``region`` (an AABB, ``[lo, hi]``
+    per axis) points are reject-sampled against it, so faces poking outside drop
+    out. With ``region=None`` there is no clip -- a single area-uniform draw over
+    the selected geoms (e.g. a whole terrain mesh via ``geom_names``).
     """
-    region = np.asarray(region)
-    tris, normals = scene_triangles(model_path, region)
+    tris, normals = scene_triangles(model_path, region, geom_names=geom_names)
     rng = np.random.default_rng(seed)
 
+    if region is None:
+        return _sample_tris(rng, tris, normals, M)             # unclipped, exactly M
+
+    region = np.asarray(region)
     xyz, nrm, need = [], [], M
     while need > 0:
         pts, nn = _sample_tris(rng, tris, normals, need * oversample)
@@ -139,6 +168,19 @@ def build_pool(model_path=MODEL, M=20000, region=REGION, seed=0, oversample=4):
         pts, nn = pts[keep][:need], nn[keep][:need]
         xyz.append(pts); nrm.append(nn); need -= len(pts)
     return np.concatenate(xyz), np.concatenate(nrm)
+
+
+def pool_from_geom(model_path, geom_name, M=20000, seed=0):
+    """Area-uniform pool from one (or a few) named geom(s), unclipped.
+
+    Convenience for steppable/terrain **mesh** geoms: point it at the terrain geom
+    in the model XML and it samples that surface directly (no region AABB, robot
+    geoms ignored). ``geom_name`` may be a str or a list of names.
+
+    Returns ``(xyz (M, 3), normal (M, 3))``.
+    """
+    names = [geom_name] if isinstance(geom_name, str) else list(geom_name)
+    return build_pool(model_path, M=M, region=None, geom_names=names, seed=seed)
 
 
 def load_pool(path=CACHE, rebuild=False, **kw):
