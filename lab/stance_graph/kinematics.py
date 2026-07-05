@@ -56,7 +56,7 @@ ALL_PLANTED = jnp.arange(6)  # all legs, for indexing convenience
 
 # Joint limits [coxa, femur, tibia], radians, from weld0.xml (<default> classes).
 JOINT_RANGES = jnp.deg2rad(jnp.array([
-    [-45.0,  45.0],    # coxa   (yaw)
+    [-65.0,  65.0],    # coxa   (yaw)
     [-80.0,  75.0],    # femur  (lift - pitch
     [  0.0, 155.0],    # tibia  (knee - pitch
 ]))

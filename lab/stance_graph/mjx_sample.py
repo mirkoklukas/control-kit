@@ -48,7 +48,6 @@ def _leg_reach_mask(shoulder, pool_xyz):
     in_lim = jnp.all((JOINT_RANGES[:, 0] <= theta) & (theta <= JOINT_RANGES[:, 1]), axis=-1)
     return reachable & in_lim
 
-
 def foot_sampler(key, b0, mean, pool_xyz, N=100, std=FOOT_STD, shift=FOOT_SHIFT):
     """Draw ``N`` foot layouts from the terrain pool.
 

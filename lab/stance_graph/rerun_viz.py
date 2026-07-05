@@ -109,7 +109,7 @@ def _hex_prism(radius=0.15, thickness=0.05):
     return verts, np.array(faces, dtype=int)
 
 
-def log_hex(path, body: SE3, *, color=(200, 200, 200), radius=0.15, thickness=0.05,
+def log_hex(path, body: SE3, *, color=(66, 135, 245), radius=0.15, thickness=0.05,
             edge_color=(40, 40, 40)):
     """Draw the hexagonal robot body (a hexagonal prism) at ``body``'s pose.
 
