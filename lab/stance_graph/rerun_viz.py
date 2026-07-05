@@ -169,6 +169,33 @@ def log_points(points, values=None, *, cmap="viridis", vmin=None, vmax=None,
     rr.log(entity, rr.Points3D(pts, radii=radius, colors=colors))
 
 
+def log_spheres(centers, radii, values=None, *, cmap="viridis", vmin=None, vmax=None,
+                color=(120, 120, 120), fill_mode="solid", entity="spheres"):
+    """Draw solid spheres, colored per-sphere by ``values`` through ``cmap``.
+
+    Args:
+        centers: (N, 3) sphere centers.
+        radii: (N,) or scalar sphere radii (metres).
+        values: (N,) per-sphere scalars mapped through ``cmap``; None -> flat ``color``.
+        cmap: matplotlib colormap name.
+        vmin: lower color bound (default data min).
+        vmax: upper color bound (default data max).
+        color: flat RGB used when ``values`` is None.
+        fill_mode: rerun fill mode ("solid" or "majorwireframe").
+        entity: rerun entity path.
+    """
+    c = np.asarray(centers, dtype=np.float32)
+    n = c.shape[0]
+    r = np.broadcast_to(np.asarray(radii, np.float32), (n,))
+    half = np.repeat(r[:, None], 3, axis=1)                   # sphere -> equal half-sizes
+    if values is None:
+        colors = np.tile(np.asarray(color, np.uint8), (n, 1))
+    else:
+        colors = colors_from_values(values, cmap=cmap, vmin=vmin, vmax=vmax)
+    rr.log(entity, rr.Ellipsoids3D(centers=c, half_sizes=half, colors=colors,
+                                   fill_mode=fill_mode))
+
+
 def log_robot(body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
               entity="world", body_size=(0.20, 0.20, 0.05),
               foot_radius=0.0125, leg_radius=0.005):
