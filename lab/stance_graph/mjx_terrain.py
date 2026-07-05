@@ -315,6 +315,7 @@ def climb_surface(model_path=MODEL, floor_x=(-1.0, 1.0), floor_y=(-2.0, 2.0),
     Returns:
         vertices: (V, 3) mesh vertices.
         faces: (F, 3) int triangle indices. Feed to :func:`sample_mesh`.
+        normals: (V, 3) outward per-vertex normals (for :func:`log_mesh` shading).
     """
     model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(model)
@@ -342,7 +343,16 @@ def climb_surface(model_path=MODEL, floor_x=(-1.0, 1.0), floor_y=(-2.0, 2.0),
                              (x1, y0, z1), (x0, y0, z1)])
     _add_quad(verts, faces, [(x0, y1, z0), (x0, y1, z1),           # side y=y1
                              (x1, y1, z1), (x1, y1, z0)])
-    return np.array(verts, dtype=float), np.array(faces, dtype=int)
+
+    vertices = np.array(verts, dtype=float)
+    faces = np.array(faces, dtype=int)
+    tris = vertices[faces]
+    fn = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])   # outward (winding)
+    fn /= np.linalg.norm(fn, axis=1, keepdims=True) + 1e-12
+    normals = np.zeros_like(vertices)                                 # accumulate per vertex
+    np.add.at(normals, faces.reshape(-1), np.repeat(fn, 3, axis=0))
+    normals /= np.linalg.norm(normals, axis=1, keepdims=True) + 1e-12
+    return vertices, faces, normals
 
 
 def load_pool(path=CACHE, rebuild=False, **kw):
