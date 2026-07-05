@@ -258,7 +258,8 @@ def log_spheres(path, centers, radii, values=None, colors=None, *, cmap="viridis
 
 
 def log_robot(path, body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
-              body_size=(0.20, 0.20, 0.05), foot_radius=0.0125, leg_radius=0.005):
+              hex_body=False, body_size=(0.20, 0.20, 0.05), foot_radius=0.0125,
+              leg_radius=0.005):
     """Draw one configuration under ``path``.
 
     path        : str       rerun entity path.
@@ -267,8 +268,12 @@ def log_robot(path, body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
     stance      : (F,) int  ids (0..5) of the planted legs; their feet are drawn
                             in ``FOOT_STANCE_COLOR``, the rest in ``FOOT_FREE_COLOR``.
     only_stance : bool      if True, draw only the ``stance`` legs.
+    hex_body    : bool      draw the hexagonal body (``log_hex``) instead of the box.
     """
-    log_body(path, body, body_size=body_size)
+    if hex_body:
+        log_hex(path, body)
+    else:
+        log_body(path, body, body_size=body_size)
 
     xpos = np.asarray(infer_joint_xpos(body, jnp.asarray(theta)))   # (6, 4, 3)
     stance = np.asarray(stance).astype(int).reshape(-1)
@@ -319,14 +324,15 @@ def log_trajectory(path, bodies: SE3, thetas, stances, *, timeline="t", **kw):
         log_robot(path, bodies[i], thetas[i], stance=stances[i], **kw)
 
 
-def log_stack(path, bodies: SE3, thetas, stances=None, **kw):
+def log_stack(path, bodies: SE3, thetas, stances=None, *, hex_body=True, **kw):
     """Overlay N configurations at a single time, each on its own sub-path.
 
-    path    : str              base rerun entity path.
-    bodies  : SE3 batch (N,)   one base pose per robot.
-    thetas  : (N, 6, 3)        per-robot joint angles.
-    stances : (N, F) int / length-N sequence / None   per-robot planted leg ids
-              (None -> all legs planted for every robot).
+    path     : str              base rerun entity path.
+    bodies   : SE3 batch (N,)   one base pose per robot.
+    thetas   : (N, 6, 3)        per-robot joint angles.
+    stances  : (N, F) int / length-N sequence / None   per-robot planted leg ids
+               (None -> all legs planted for every robot).
+    hex_body : bool             draw the hexagonal body (default) vs the box.
 
     Unlike :func:`log_trajectory`, all robots are drawn at once (distinct
     ``{path}/{i}`` paths) rather than across a timeline. Extra kwargs
@@ -335,7 +341,7 @@ def log_stack(path, bodies: SE3, thetas, stances=None, **kw):
     thetas = jnp.asarray(thetas)
     for i in range(thetas.shape[0]):
         stance = ALL_PLANTED if stances is None else stances[i]
-        log_robot(f"{path}/{i}", bodies[i], thetas[i], stance=stance, **kw)
+        log_robot(f"{path}/{i}", bodies[i], thetas[i], stance=stance, hex_body=hex_body, **kw)
 
 
 def _demo(connect=8812):
