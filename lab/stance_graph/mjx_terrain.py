@@ -260,6 +260,91 @@ def pool_from_geom(model_path, geom_name, M=20000, drop_underside=True, seed=0):
                       drop_underside=drop_underside, seed=seed)
 
 
+# --------------------------------------------------------------------------- #
+# Explicit sampling meshes (authored surfaces, not part of the simulation)     #
+# --------------------------------------------------------------------------- #
+def sample_mesh(vertices, faces, M=20000, seed=0):
+    """Area-uniform pool from an explicit triangle mesh.
+
+    A sampling-only surface: hand it any ``(vertices, faces)`` (in-code, or loaded
+    from an ``.obj``) and it area-samples the triangles. Nothing to do with the
+    physics scene -- useful to define exactly the region footholds may land on.
+
+    Args:
+        vertices: (V, 3) mesh vertices.
+        faces: (F, 3) int triangle vertex indices.
+        M: number of pool points to return.
+        seed: RNG seed.
+
+    Returns:
+        xyz: (M, 3) surface points.
+        normal: (M, 3) unit face normal at each point (from the vertex winding).
+    """
+    verts = np.asarray(vertices, dtype=float)
+    faces = np.asarray(faces, dtype=int)
+    tris = verts[faces]                                         # (F, 3, 3)
+    n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-12
+    return _sample_tris(np.random.default_rng(seed), tris, n, M)
+
+
+def _add_quad(verts, faces, corners):
+    """Append a quad (4 corners) as two triangles to ``(verts, faces)`` in place."""
+    i = len(verts)
+    verts.extend(corners)
+    faces.append([i, i + 1, i + 2])
+    faces.append([i, i + 2, i + 3])
+
+
+def climb_surface(model_path=MODEL, floor_x=(-1.0, 1.0), floor_y=(-2.0, 2.0),
+                  box_geom="box"):
+    """Author the weld0 climb surface as a sampling mesh (not a physics geom).
+
+    The surface is the floor up to the box plus the box's top and four sides --
+    no bottom face, no floor buried under the box. The box pose/size is read
+    (read-only) from the model, so the surface stays in sync with the geometry.
+    Assumes an axis-aligned box (true for weld0).
+
+    Args:
+        model_path: model XML to read the box geom from (not modified).
+        floor_x: (lo, hi) floor extent in x. Default stops at the box near face
+            (x=1) so no floor lands under the box; set hi>1 to extend under it.
+        floor_y: (lo, hi) floor extent in y.
+        box_geom: name of the box geom to wrap.
+
+    Returns:
+        vertices: (V, 3) mesh vertices.
+        faces: (F, 3) int triangle indices. Feed to :func:`sample_mesh`.
+    """
+    model = mujoco.MjModel.from_xml_path(str(model_path))
+    data = mujoco.MjData(model)
+    mujoco.mj_forward(model, data)
+    g = mujoco.mj_name2id(model, mujoco.mjtObj.mjOBJ_GEOM, box_geom)
+    if g < 0:
+        raise ValueError(f"no geom named {box_geom!r} in {model_path}")
+    c, h = data.geom_xpos[g], model.geom_size[g]               # centre, half-extents
+    x0, x1 = c[0] - h[0], c[0] + h[0]
+    y0, y1 = c[1] - h[1], c[1] + h[1]
+    z0, z1 = c[2] - h[2], c[2] + h[2]
+
+    verts, faces = [], []
+    fx0, fx1 = floor_x
+    fy0, fy1 = floor_y
+    _add_quad(verts, faces, [(fx0, fy0, 0.0), (fx1, fy0, 0.0),      # floor (z=0)
+                             (fx1, fy1, 0.0), (fx0, fy1, 0.0)])
+    _add_quad(verts, faces, [(x0, y0, z1), (x1, y0, z1),           # box top (z=z1)
+                             (x1, y1, z1), (x0, y1, z1)])
+    _add_quad(verts, faces, [(x0, y0, z0), (x0, y0, z1),           # side x=x0 (near)
+                             (x0, y1, z1), (x0, y1, z0)])
+    _add_quad(verts, faces, [(x1, y0, z0), (x1, y1, z0),           # side x=x1 (far)
+                             (x1, y1, z1), (x1, y0, z1)])
+    _add_quad(verts, faces, [(x0, y0, z0), (x1, y0, z0),           # side y=y0
+                             (x1, y0, z1), (x0, y0, z1)])
+    _add_quad(verts, faces, [(x0, y1, z0), (x0, y1, z1),           # side y=y1
+                             (x1, y1, z1), (x1, y1, z0)])
+    return np.array(verts, dtype=float), np.array(faces, dtype=int)
+
+
 def load_pool(path=CACHE, rebuild=False, **kw):
     """Load the cached pool, building (and caching) it on first use.
 
