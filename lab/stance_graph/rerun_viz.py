@@ -75,6 +75,56 @@ def log_body(body: SE3, *, color=(200, 200, 200), entity="world", body_size=(0.2
                       colors=[color]))
 
 
+def _hex_prism(radius=0.15, thickness=0.05):
+    """Vertices/faces of a hexagonal prism (the robot body), centred at origin.
+
+    Corners are at angles 30, 90, ... 330 deg and circumradius ``radius`` --
+    matching the ``hexbody`` mesh (and the shoulders) in the weld0 model.
+
+    Args:
+        radius: hexagon circumradius (metres).
+        thickness: prism thickness in z (metres).
+
+    Returns:
+        vertices: (12, 3) prism vertices (top hexagon then bottom hexagon).
+        faces: (20, 3) int triangle indices (2 caps + 6 side quads).
+    """
+    ang = np.deg2rad(np.arange(30.0, 360.0, 60.0))
+    hx, hy = radius * np.cos(ang), radius * np.sin(ang)
+    h = thickness / 2.0
+    top = np.stack([hx, hy, np.full(6, h)], axis=1)
+    bot = np.stack([hx, hy, np.full(6, -h)], axis=1)
+    verts = np.concatenate([top, bot], axis=0)               # (12, 3)
+    faces = []
+    for i in range(1, 5):                                    # top cap fan
+        faces.append([0, i, i + 1])
+    for i in range(1, 5):                                    # bottom cap fan (reversed)
+        faces.append([6, 6 + i + 1, 6 + i])
+    for i in range(6):                                       # side quads -> 2 tris each
+        j = (i + 1) % 6
+        faces += [[i, j, 6 + j], [i, 6 + j, 6 + i]]
+    return verts, np.array(faces, dtype=int)
+
+
+def log_hex(body: SE3, *, color=(200, 200, 200), radius=0.15, thickness=0.05,
+            edge_color=(40, 40, 40), entity="world"):
+    """Draw the hexagonal robot body (a hexagonal prism) at ``body``'s pose.
+
+    Args:
+        body: SE3 world pose of the base.
+        color: RGB(A) uint8 body color.
+        radius: hexagon circumradius (metres); default matches the weld0 model.
+        thickness: prism thickness in z (metres).
+        edge_color: wireframe edge color; None to skip.
+        entity: rerun entity path.
+    """
+    verts, faces = _hex_prism(radius, thickness)
+    t = np.asarray(body.translation())
+    q_xyzw = np.asarray(body.rotation().as_quaternion_xyzw())
+    rr.log(f"{entity}/hex", rr.Transform3D(translation=t, rotation=rr.Quaternion(xyzw=q_xyzw)))
+    log_mesh(verts, faces, color=color, edge_color=edge_color, entity=f"{entity}/hex/body")
+
+
 def colors_from_values(values, *, cmap="viridis", vmin=None, vmax=None):
     """Map scalars ``values`` (N,) to (N, 3) uint8 RGB via a matplotlib colormap.
 
