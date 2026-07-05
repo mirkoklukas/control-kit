@@ -41,10 +41,19 @@ REGION = np.array([[-1.0, 1.0],      # x: origin -> the wall base at x=1 (floor 
 # Tessellation: one geom -> (tris (T, 3, 3), normals (T, 3))                   #
 # --------------------------------------------------------------------------- #
 def _plane_triangles(pos, R, region):
-    """A bounded rectangle for an (assumed near-horizontal) plane.
+    """Bounded rectangle for an (assumed near-horizontal) plane.
 
-    Built directly in world xy over ``region``'s xy bounds at height ``pos[2]``;
-    normal is the plane's world +z. Exact for the axis-aligned floor in weld0.
+    The rectangle is built directly in world xy over ``region``'s xy bounds at
+    height ``pos[2]``. Exact for the axis-aligned floor in weld0.
+
+    Args:
+        pos: (3,) world position of the plane geom.
+        R: (3, 3) world rotation of the plane (local +z is the normal).
+        region: (3, 2) AABB ``[lo, hi]`` per axis; the rectangle spans the xy bounds.
+
+    Returns:
+        tris: (2, 3, 3) two triangles over the xy bounds at height ``pos[2]``.
+        normals: (2, 3) the plane's world +z, one per triangle.
     """
     (xlo, xhi), (ylo, yhi), _ = region
     z = pos[2]
@@ -56,7 +65,17 @@ def _plane_triangles(pos, R, region):
 
 
 def _box_triangles(pos, R, half):
-    """12 triangles (2 per face) for a box at pose ``(pos, R)``, half-extents ``half``."""
+    """Tessellate a box into 12 triangles (2 per face).
+
+    Args:
+        pos: (3,) world position of the box centre.
+        R: (3, 3) world rotation of the box.
+        half: (3,) half-extents along the local axes.
+
+    Returns:
+        tris: (12, 3, 3) triangle vertices in world coordinates.
+        normals: (12, 3) outward face normal, one per triangle.
+    """
     tris, normals = [], []
     for a in range(3):                       # face-normal axis
         b, c = (a + 1) % 3, (a + 2) % 3
@@ -75,7 +94,18 @@ def _box_triangles(pos, R, half):
 
 
 def _mesh_triangles(model, g, pos, R):
-    """Triangles for a MuJoCo ``mesh`` geom, transformed to world."""
+    """Tessellate a MuJoCo ``mesh`` geom into world-space triangles.
+
+    Args:
+        model: the ``MjModel`` holding the mesh asset.
+        g: geom id of the mesh geom.
+        pos: (3,) world position of the geom.
+        R: (3, 3) world rotation of the geom.
+
+    Returns:
+        tris: (F, 3, 3) triangle vertices in world coordinates.
+        normals: (F, 3) unit face normals from the vertex winding.
+    """
     did = int(model.geom_dataid[g])
     vadr, vnum = int(model.mesh_vertadr[did]), int(model.mesh_vertnum[did])
     fadr, fnum = int(model.mesh_faceadr[did]), int(model.mesh_facenum[did])
@@ -88,13 +118,19 @@ def _mesh_triangles(model, g, pos, R):
 
 
 def scene_triangles(model_path=MODEL, region=REGION, geom_names=None):
-    """World-space triangle soup (+ normals) of terrain geoms in the scene.
+    """World-space triangle soup (+ normals) of selected terrain geoms.
 
-    geom_names : None -> every world-body geom; else a list of geom names to use
-                 (any body), e.g. a single ``"terrain"`` mesh geom.
-    region     : bounds the (infinite) plane rectangle. If ``None``, planes are
-                 skipped (they can't be area-sampled unbounded); meshes/boxes are
-                 unaffected.
+    Args:
+        model_path: path to the model XML.
+        region: (3, 2) AABB used only to bound the (infinite) plane rectangle. If
+            ``None``, planes are skipped (they can't be area-sampled unbounded);
+            boxes/meshes are unaffected.
+        geom_names: ``None`` -> every world-body geom (``geom_bodyid == 0``); else
+            a list of geom names to tessellate (any body), e.g. terrain meshes.
+
+    Returns:
+        tris: (T, 3, 3) triangle vertices in world coordinates.
+        normals: (T, 3) outward face normal, one per triangle.
     """
     model = mujoco.MjModel.from_xml_path(str(model_path))
     data = mujoco.MjData(model)
@@ -135,7 +171,19 @@ def scene_triangles(model_path=MODEL, region=REGION, geom_names=None):
 # Area-uniform sampling                                                       #
 # --------------------------------------------------------------------------- #
 def _sample_tris(rng, tris, normals, n):
-    """Area-weighted triangle pick + uniform barycentric point (with its normal)."""
+    """Draw ``n`` area-uniform points on a triangle soup.
+
+    Args:
+        rng: a numpy ``Generator``.
+        tris: (T, 3, 3) triangle vertices.
+        normals: (T, 3) per-triangle normals.
+        n: number of points to draw.
+
+    Returns:
+        pts: (n, 3) sampled points -- triangle picked with probability
+            proportional to area, then a uniform barycentric point inside it.
+        normals: (n, 3) the normal of each point's source triangle.
+    """
     v0, v1, v2 = tris[:, 0], tris[:, 1], tris[:, 2]
     areas = 0.5 * np.linalg.norm(np.cross(v1 - v0, v2 - v0), axis=1)
     idx = rng.choice(len(tris), size=n, p=areas / areas.sum())
@@ -146,15 +194,34 @@ def _sample_tris(rng, tris, normals, n):
     return pts, normals[idx]
 
 
-def build_pool(model_path=MODEL, M=20000, region=REGION, geom_names=None, seed=0, oversample=4):
-    """Area-uniform pool of ``M`` surface points (+ normals) over the terrain.
+def build_pool(model_path=MODEL, M=20000, region=REGION, geom_names=None,
+               drop_underside=True, seed=0, oversample=4):
+    """Area-uniform pool of surface points (+ normals) over the terrain.
 
-    Returns ``(xyz (M, 3), normal (M, 3))``. With ``region`` (an AABB, ``[lo, hi]``
-    per axis) points are reject-sampled against it, so faces poking outside drop
-    out. With ``region=None`` there is no clip -- a single area-uniform draw over
-    the selected geoms (e.g. a whole terrain mesh via ``geom_names``).
+    Args:
+        model_path: path to the model XML.
+        M: number of pool points to return.
+        region: (3, 2) AABB ``[lo, hi]`` per axis. Points are reject-sampled
+            against it (faces poking outside drop out). ``None`` -> no clip: a
+            single area-uniform draw over the selected geoms.
+        geom_names: geoms to sample; ``None`` -> all world-body geoms. See
+            :func:`scene_triangles`.
+        drop_underside: drop triangles whose outward normal points downward
+            (``n_z < 0``), e.g. a box's bottom face -- never a valid foothold.
+            Vertical faces (``n_z == 0``, e.g. a climbable wall) are kept.
+        seed: RNG seed.
+        oversample: batch factor for reject sampling when ``region`` is set.
+
+    Returns:
+        xyz: (M, 3) surface points.
+        normal: (M, 3) outward normal at each point.
     """
     tris, normals = scene_triangles(model_path, region, geom_names=geom_names)
+    if drop_underside:
+        keep = normals[:, 2] >= -1e-6                           # keep up + vertical faces
+        tris, normals = tris[keep], normals[keep]
+        if len(tris) == 0:
+            raise ValueError("drop_underside removed every face")
     rng = np.random.default_rng(seed)
 
     if region is None:
@@ -170,21 +237,41 @@ def build_pool(model_path=MODEL, M=20000, region=REGION, geom_names=None, seed=0
     return np.concatenate(xyz), np.concatenate(nrm)
 
 
-def pool_from_geom(model_path, geom_name, M=20000, seed=0):
+def pool_from_geom(model_path, geom_name, M=20000, drop_underside=True, seed=0):
     """Area-uniform pool from one (or a few) named geom(s), unclipped.
 
-    Convenience for steppable/terrain **mesh** geoms: point it at the terrain geom
-    in the model XML and it samples that surface directly (no region AABB, robot
-    geoms ignored). ``geom_name`` may be a str or a list of names.
+    Convenience for steppable/terrain **mesh** geoms: point it at the terrain
+    geom(s) in the model XML and it samples that surface directly (no region AABB,
+    other geoms ignored).
 
-    Returns ``(xyz (M, 3), normal (M, 3))``.
+    Args:
+        model_path: path to the model XML.
+        geom_name: a geom name, or a list of geom names, to sample.
+        M: number of pool points to return.
+        drop_underside: drop downward-facing triangles (e.g. a box's bottom face).
+        seed: RNG seed.
+
+    Returns:
+        xyz: (M, 3) surface points.
+        normal: (M, 3) outward normal at each point.
     """
     names = [geom_name] if isinstance(geom_name, str) else list(geom_name)
-    return build_pool(model_path, M=M, region=None, geom_names=names, seed=seed)
+    return build_pool(model_path, M=M, region=None, geom_names=names,
+                      drop_underside=drop_underside, seed=seed)
 
 
 def load_pool(path=CACHE, rebuild=False, **kw):
-    """Load the cached pool, building (and caching) it on first use."""
+    """Load the cached pool, building (and caching) it on first use.
+
+    Args:
+        path: ``.npz`` cache path.
+        rebuild: force a rebuild even if the cache exists.
+        **kw: forwarded to :func:`build_pool` when (re)building.
+
+    Returns:
+        xyz: (M, 3) surface points.
+        normal: (M, 3) outward normal at each point.
+    """
     path = Path(path)
     if rebuild or not path.exists():
         xyz, nrm = build_pool(**kw)

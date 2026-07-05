@@ -34,8 +34,14 @@ FOOT_SHIFT = jnp.array([0.1, 0.0, 0.0])
 
 def _leg_reach_mask(shoulder, pool_xyz):
     """Per-pool-point IK feasibility for one leg: in the reach annulus AND in
-    joint limits on the elbow-down branch. ``shoulder`` is the leg's world frame.
-    Returns a bool ``(M,)``.
+    joint limits on the elbow-down branch.
+
+    Args:
+        shoulder: SE3 world pose of the leg's shoulder frame.
+        pool_xyz: (M, 3) terrain surface points.
+
+    Returns:
+        (M,) bool mask -- whether each point is a feasible foothold for this leg.
     """
     reachable, theta = jax.vmap(_infer_theta, (None, 0, None))(shoulder, pool_xyz, LENGTHS)
     theta = theta[:, 0]                                             # elbow-down, (M, 3)
@@ -44,18 +50,24 @@ def _leg_reach_mask(shoulder, pool_xyz):
 
 
 def foot_sampler(key, b0, mean, pool_xyz, N=100, std=FOOT_STD, shift=FOOT_SHIFT):
-    """Draw ``N`` foot layouts from the terrain ``pool_xyz`` ``(M, 3)``.
+    """Draw ``N`` foot layouts from the terrain pool.
 
     For each of the 6 legs, weight the pool by a locality kernel around
     ``mean[leg] + shift`` (Gaussian on xy, ``std`` metres) times an IK-reach mask
     from ``b0``, then sample ``N`` footholds. If a leg has no reachable pool point
     in range, it falls back to the locality kernel alone.
 
-    b0       : SE3        node body pose (the reachability reference).
-    mean     : (6, 3)     current footholds, one per leg.
-    pool_xyz : (M, 3)     terrain surface points.
+    Args:
+        key: PRNG key.
+        b0: SE3 node body pose (the reachability reference).
+        mean: (6, 3) current footholds, one per leg.
+        pool_xyz: (M, 3) terrain surface points.
+        N: number of foot layouts to draw.
+        std: locality-kernel std (metres) on xy.
+        shift: (3,) forward nudge added to each leg's target.
 
-    Returns ``(N, 6, 3)`` foot layouts (feet carry their real terrain z).
+    Returns:
+        (N, 6, 3) foot layouts; feet carry their real terrain z.
     """
     M = pool_xyz.shape[0]
     shoulders = b0 @ SHOULDERS                                     # (6,) SE3
