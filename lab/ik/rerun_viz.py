@@ -67,18 +67,19 @@ def leg_points(shoulder: SE3, theta, lengths) -> jnp.ndarray:
     return jnp.stack([T0.translation(), T1.translation(), T2.translation(), T3.translation()])
 
 
-def log_robot(body_pose: SE3, theta, fids, *, entity="world",
+def log_robot(path, body_pose: SE3, theta, fids, *,
               body_size=(0.30, 0.30, 0.05), foot_radius=0.025, leg_radius=0.01):
-    """Draw one configuration under ``entity``.
+    """Draw one configuration under ``path``.
 
+    path      : str     rerun entity path.
     body_pose : SE3     world pose of the base.
     theta     : (k, 3)  joint angles [coxa, femur, tibia] for the shown legs.
     fids      : (k,)    leg ids (0..5) the rows of ``theta`` refer to.
     """
     t = np.asarray(body_pose.translation())
     q_xyzw = np.asarray(body_pose.rotation().as_quaternion_xyzw())
-    rr.log(f"{entity}/base", rr.Transform3D(translation=t, rotation=rr.Quaternion(xyzw=q_xyzw)))
-    rr.log(f"{entity}/base/box",
+    rr.log(f"{path}/base", rr.Transform3D(translation=t, rotation=rr.Quaternion(xyzw=q_xyzw)))
+    rr.log(f"{path}/base/box",
            rr.Boxes3D(half_sizes=[np.array(body_size) / 2.0], fill_mode="solid",
                       colors=[(200, 200, 200)]))
 
@@ -87,25 +88,26 @@ def log_robot(body_pose: SE3, theta, fids, *, entity="world",
     fids = np.asarray(fids).astype(int)
     for row, fid in enumerate(fids):
         pts = np.asarray(leg_points(shoulders[int(fid)], theta[row], LENGTHS))
-        rr.log(f"{entity}/leg{fid}", rr.LineStrips3D([pts], radii=leg_radius, colors=[(90, 90, 90)]))
-        rr.log(f"{entity}/leg{fid}/foot",
+        rr.log(f"{path}/leg{fid}", rr.LineStrips3D([pts], radii=leg_radius, colors=[(90, 90, 90)]))
+        rr.log(f"{path}/leg{fid}/foot",
                rr.Points3D(pts[-1:], radii=foot_radius, colors=[(255, 66, 249)]))
 
 
-def log_poses(body_poses: SE3, thetas, fids, *, timeline="pose", **kw):
-    """Draw N configurations on a scrubbable timeline.
+def log_poses(path, body_poses: SE3, thetas, fids, *, timeline="pose", **kw):
+    """Draw N configurations under ``path`` on a scrubbable timeline.
 
+    path       : str              rerun entity path.
     body_poses : SE3 batch (N,)   one base pose per frame.
     thetas     : (N, k, 3)        per-frame joint angles for the shown legs.
     fids       : (k,)             leg ids the columns of ``thetas`` refer to.
 
     Each pose is logged at time index i on ``timeline`` (scrub/play in the
-    viewer). For a simultaneous overlay instead, log to distinct ``entity`` paths.
+    viewer). For a simultaneous overlay instead, use distinct paths.
     """
     thetas = jnp.asarray(thetas)
     for i in range(thetas.shape[0]):
         rr.set_time(timeline, sequence=i)
-        log_robot(body_poses[i], thetas[i], fids, **kw)
+        log_robot(path, body_poses[i], thetas[i], fids, **kw)
 
 
 def _demo(connect=8812):
@@ -114,7 +116,7 @@ def _demo(connect=8812):
     zs = jnp.linspace(0.18, 0.28, n)                                  # sweep body height
     body_poses = SE3.from_translation(jnp.stack([jnp.zeros(n), jnp.zeros(n), zs], axis=-1))
     thetas = jnp.broadcast_to(jnp.array([0.0, 0.0523599, 1.46608]), (n, 6, 3))
-    log_poses(body_poses, thetas, jnp.arange(6))
+    log_poses("world", body_poses, thetas, jnp.arange(6))
     print(f"streamed {n} poses -> rerun on port {connect}")
 
 
