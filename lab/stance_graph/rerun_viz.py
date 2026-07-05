@@ -219,18 +219,21 @@ def log_points(points, values=None, *, cmap="viridis", vmin=None, vmax=None,
     rr.log(entity, rr.Points3D(pts, radii=radius, colors=colors))
 
 
-def log_spheres(centers, radii, values=None, *, cmap="viridis", vmin=None, vmax=None,
-                color=(120, 120, 120), fill_mode="solid", entity="spheres"):
-    """Draw solid spheres, colored per-sphere by ``values`` through ``cmap``.
+def log_spheres(centers, radii, values=None, colors=None, *, cmap="viridis",
+                vmin=None, vmax=None, color=(120, 120, 120), fill_mode="solid",
+                entity="spheres"):
+    """Draw solid spheres, colored by explicit ``colors`` or ``values`` via ``cmap``.
 
     Args:
         centers: (N, 3) sphere centers.
         radii: (N,) or scalar sphere radii (metres).
-        values: (N,) per-sphere scalars mapped through ``cmap``; None -> flat ``color``.
+        values: (N,) per-sphere scalars mapped through ``cmap`` (ignored if
+            ``colors`` is given).
+        colors: (N, 3/4) explicit per-sphere RGB(A) colors; takes precedence.
         cmap: matplotlib colormap name.
         vmin: lower color bound (default data min).
         vmax: upper color bound (default data max).
-        color: flat RGB used when ``values`` is None.
+        color: flat RGB used when neither ``colors`` nor ``values`` is given.
         fill_mode: rerun fill mode ("solid" or "majorwireframe").
         entity: rerun entity path.
     """
@@ -238,11 +241,13 @@ def log_spheres(centers, radii, values=None, *, cmap="viridis", vmin=None, vmax=
     n = c.shape[0]
     r = np.broadcast_to(np.asarray(radii, np.float32), (n,))
     half = np.repeat(r[:, None], 3, axis=1)                   # sphere -> equal half-sizes
-    if values is None:
-        colors = np.tile(np.asarray(color, np.uint8), (n, 1))
+    if colors is not None:
+        cols = np.asarray(colors)
+    elif values is not None:
+        cols = colors_from_values(values, cmap=cmap, vmin=vmin, vmax=vmax)
     else:
-        colors = colors_from_values(values, cmap=cmap, vmin=vmin, vmax=vmax)
-    rr.log(entity, rr.Ellipsoids3D(centers=c, half_sizes=half, colors=colors,
+        cols = np.tile(np.asarray(color, np.uint8), (n, 1))
+    rr.log(entity, rr.Ellipsoids3D(centers=c, half_sizes=half, colors=cols,
                                    fill_mode=fill_mode))
 
 
