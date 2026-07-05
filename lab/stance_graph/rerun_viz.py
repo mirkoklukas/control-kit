@@ -229,7 +229,8 @@ def log_spheres(centers, radii, values=None, colors=None, *, cmap="viridis",
         radii: (N,) or scalar sphere radii (metres).
         values: (N,) per-sphere scalars mapped through ``cmap`` (ignored if
             ``colors`` is given).
-        colors: (N, 3/4) explicit per-sphere RGB(A) colors; takes precedence.
+        colors: explicit color(s); takes precedence. Either a single RGB(A)
+            tuple applied to all spheres, or a (N, 3/4) per-sphere array.
         cmap: matplotlib colormap name.
         vmin: lower color bound (default data min).
         vmax: upper color bound (default data max).
@@ -243,6 +244,8 @@ def log_spheres(centers, radii, values=None, colors=None, *, cmap="viridis",
     half = np.repeat(r[:, None], 3, axis=1)                   # sphere -> equal half-sizes
     if colors is not None:
         cols = np.asarray(colors)
+        if cols.ndim == 1:                                    # single color -> all spheres
+            cols = np.tile(cols, (n, 1))
     elif values is not None:
         cols = colors_from_values(values, cmap=cmap, vmin=vmin, vmax=vmax)
     else:
