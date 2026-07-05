@@ -19,3 +19,6 @@ runs/
 # underscore collides with Python's "internal module" convention, e.g. _compat.py).
 scratch/
 **/.DS_Store
+
+# Derived terrain sampling pool (rebuilt from the model by mjx_terrain.load_pool).
+*_pool.npz
