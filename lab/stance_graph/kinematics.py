@@ -126,6 +126,13 @@ def infer_joint_xpos(body: SE3, thetas: jax.Array) -> jax.Array:
 
     return jax.vmap(_infer_joint_xpos)(shoulders, thetas)  # (6, 4, 3)
 
+
+def infer_foot_vectors(body: SE3, thetas: jax.Array) -> jax.Array:
+    """Return the world vectors foot to knee"""
+    shoulders = body @ SHOULDERS
+    joint_xpos = jax.vmap(_infer_joint_xpos)(shoulders, thetas)  # (6, 4, 3)
+    return joint_xpos[:, -2] - joint_xpos[:, -1]  # (6, 3) vectors from each joint to the next
+
 # Planted feet at the home stance: base at height 0.241185, identity orientation,
 # all legs at the home joint angles. Shape (6, 3), indexed by leg like SHOULDERS.
 _HOME_BASE = SE3.from_translation(jnp.array([0.0, 0.0, 0.241185]))
