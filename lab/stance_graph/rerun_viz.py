@@ -280,8 +280,8 @@ def log_robot(path, body: SE3, theta, *, f=None, tau=None,
         body: SE3 world pose of the base.
         theta: (6, 3) joint angles [coxa, femur, tibia] per leg.
         f: (6, 3) foot forces (world); if given, a 3D arrow is drawn at each foot.
-        tau: (6, 3) joint torques [coxa, femur, tibia]; if given, the legs are drawn
-            as capsules colored per segment by torque through ``cmap``.
+        tau: (6, 3) joint torques [coxa, femur, tibia]; if given, the leg capsules
+            are colored per segment by torque through ``cmap`` (else flat gray).
         taumin, taumax: torque color bounds; default symmetric +/- max|tau|.
         cmap: matplotlib colormap for torque (diverging, e.g. "bwr").
         foot_radius, leg_radius: foot-sphere / leg-capsule radii (m).
@@ -293,20 +293,19 @@ def log_robot(path, body: SE3, theta, *, f=None, tau=None,
     xpos = np.asarray(infer_joint_xpos(body, jnp.asarray(theta)))  # (6, 4, 3)
     feet = xpos[:, -1, :]                                          # (6, 3)
 
-    if tau is not None:                                            # legs = capsules by torque
-        a = xpos[:, :3, :].reshape(-1, 3)                         # (18,3) segment starts
-        b = xpos[:, 1:, :].reshape(-1, 3)                         # (18,3) segment ends
-        t = np.asarray(tau).reshape(-1)                          # (18,) coxa/femur/tibia per leg
+    a = xpos[:, :3, :].reshape(-1, 3)                             # (18,3) segment starts
+    b = xpos[:, 1:, :].reshape(-1, 3)                             # (18,3) segment ends
+    if tau is not None:                                           # color per segment by torque
+        t = np.asarray(tau).reshape(-1)                          # coxa/femur/tibia per leg
         hi = float(np.abs(t).max()) if taumax is None else taumax
         lo = -hi if taumin is None else taumin
         colors = colors_from_values(t, cmap=cmap, vmin=lo, vmax=hi)
-        d = b - a
-        rr.log(f"{path}/legs", rr.Capsules3D(
-            lengths=np.linalg.norm(d, axis=-1), radii=leg_radius, translations=a,
-            quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(d)], colors=colors))
-    else:                                                          # plain gray legs
-        rr.log(f"{path}/legs",
-               rr.LineStrips3D(list(xpos), radii=leg_radius, colors=[FREE_COLOR] * 6))
+    else:                                                         # flat gray
+        colors = np.tile(np.array(FREE_COLOR, np.uint8), (a.shape[0], 1))
+    d = b - a
+    rr.log(f"{path}/legs", rr.Capsules3D(                        # legs = capsules
+        lengths=np.linalg.norm(d, axis=-1), radii=leg_radius, translations=a,
+        quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(d)], colors=colors))
 
     rr.log(f"{path}/feet", rr.Points3D(feet, radii=foot_radius,
                                        colors=[foot_color] * 6))   # feet = spheres
