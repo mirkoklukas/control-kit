@@ -270,7 +270,7 @@ def _quat_from_z(d):
 
 
 def log_robot(path, body: SE3, theta, *, f=None, tau=None,
-              taumin=None, taumax=None, cmap="bwr",
+              tmin=None, tmax=None, cmap="bwr",
               fmin=None, fmax=None, fcmap="viridis",
               foot_radius=0.0125, leg_radius=0.008, force_scale=0.005,
               foot_color=FOOT_STANCE_COLOR):
@@ -302,8 +302,8 @@ def log_robot(path, body: SE3, theta, *, f=None, tau=None,
     b = xpos[:, 1:, :].reshape(-1, 3)                             # (18,3) segment ends
     if tau is not None:                                           # color per segment by torque
         t = np.asarray(tau).reshape(-1)                          # coxa/femur/tibia per leg
-        hi = float(np.abs(t).max()) if taumax is None else taumax
-        lo = -hi if taumin is None else taumin
+        hi = float(np.abs(t).max()) if tmax is None else tmax
+        lo = -hi if tmin is None else tmin
         colors = colors_from_values(t, cmap=cmap, vmin=lo, vmax=hi)
     else:                                                         # flat gray
         colors = np.tile(np.array(FREE_COLOR, np.uint8), (a.shape[0], 1))
@@ -320,7 +320,7 @@ def log_robot(path, body: SE3, theta, *, f=None, tau=None,
         foot_colors = colors_from_values(mag, cmap=fcmap, vmin=lo, vmax=hi)
     else:                                                         # flat color
         foot_colors = np.tile(np.array(foot_color, np.uint8), (6, 1))
-    rr.log(f"{path}/feet", rr.Points3D(feet, radii=foot_radius, colors=foot_colors))
+    log_spheres(f"{path}/feet", feet, foot_radius, colors=foot_colors)   # feet = solid spheres
 
     if f is not None:                                             # force arrows at the feet
         vecs = np.asarray(f).reshape(6, 3) * force_scale
