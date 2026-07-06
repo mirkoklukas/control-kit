@@ -130,26 +130,28 @@ def sweep_throughput(cfg, mjx_model, foot_ids, qpos, stances):
         stances: (K, 6) planted masks.
 
     Returns:
-        dict of equal-length arrays: batch, steps, compile_s, run_s, env_steps_per_s.
+        dict of equal-length arrays: batch, steps, cold_s, warm_s, env_steps_per_s.
+        ``cold_s`` is the first run (includes JIT compile); ``warm_s`` is the fastest
+        of the ``repeats`` runs right after (compiled). Throughput uses ``warm_s``.
     """
-    rows = {k: [] for k in ("batch", "steps", "compile_s", "run_s", "env_steps_per_s")}
+    rows = {k: [] for k in ("batch", "steps", "cold_s", "warm_s", "env_steps_per_s")}
     for B in _ints(cfg.batch_sizes):
         qb, sb = _tile_to(qpos, B), _tile_to(stances, B)
         for T in _ints(cfg.step_counts):
             fn = jax.jit(lambda q, s, T=T: weld_in_place(mjx_model, foot_ids, q, s, n_steps=T)[0].qpos)
             t0 = time.perf_counter()
-            jax.block_until_ready(fn(qb, sb))                      # compile + first run
-            compile_s = time.perf_counter() - t0
-            best = np.inf
-            for _ in range(cfg.repeats):
+            jax.block_until_ready(fn(qb, sb))                      # cold: JIT compile + first run
+            cold_s = time.perf_counter() - t0
+            warm_s = np.inf
+            for _ in range(cfg.repeats):                           # warm: compiled, right after
                 t0 = time.perf_counter()
                 jax.block_until_ready(fn(qb, sb))
-                best = min(best, time.perf_counter() - t0)
-            sps = B * T / best
-            for k, v in zip(rows, (B, T, compile_s, best, sps)):
+                warm_s = min(warm_s, time.perf_counter() - t0)
+            sps = B * T / warm_s
+            for k, v in zip(rows, (B, T, cold_s, warm_s, sps)):
                 rows[k].append(v)
-            print(f"  B={B:>6} steps={T:>5}  compile={compile_s:6.2f}s "
-                  f"run={best*1e3:8.1f}ms  {sps/1e6:7.2f} M env-steps/s")
+            print(f"  B={B:>6} steps={T:>5}  cold={cold_s:6.2f}s "
+                  f"warm={warm_s*1e3:8.1f}ms  {sps/1e6:7.2f} M env-steps/s")
     return {k: np.asarray(v) for k, v in rows.items()}
 
 
@@ -218,13 +220,13 @@ def _write_summary(path, cfg, ctx, postures, sweep, peak, max_tau):
               for name, a in postures.items()]
     lines += [
         "",
-        "throughput (weld-and-settle):",
-        f"  {'batch':>8} {'steps':>7} {'compile[s]':>12} {'run[ms]':>10} {'M env-steps/s':>15}",
+        "throughput (weld-and-settle)   cold = first run incl. JIT compile; warm = compiled:",
+        f"  {'batch':>8} {'steps':>7} {'cold[s]':>10} {'warm[ms]':>10} {'M env-steps/s':>15}",
     ]
-    for b, s, c, r, sps in zip(sweep["batch"], sweep["steps"], sweep["compile_s"],
-                               sweep["run_s"], sweep["env_steps_per_s"]):
-        lines.append(f"  {int(b):>8} {int(s):>7} {c:>12.2f} {r*1e3:>10.1f} {sps/1e6:>15.2f}")
-    lines += ["", f"peak: {peak/1e6:.2f} M env-steps/s", ""]
+    for b, s, c, r, sps in zip(sweep["batch"], sweep["steps"], sweep["cold_s"],
+                               sweep["warm_s"], sweep["env_steps_per_s"]):
+        lines.append(f"  {int(b):>8} {int(s):>7} {c:>10.2f} {r*1e3:>10.1f} {sps/1e6:>15.2f}")
+    lines += ["", f"peak (warm): {peak/1e6:.2f} M env-steps/s", ""]
     path.write_text("\n".join(lines))
 
 
