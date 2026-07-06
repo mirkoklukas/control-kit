@@ -24,7 +24,7 @@ import jax.numpy as jnp
 import rerun as rr
 from jaxlie import SE3
 
-from lab.stance_graph.kinematics import infer_joint_xpos, ALL_PLANTED
+from lab.stance_graph.kinematics import infer_joint_xpos
 
 FREE_COLOR = (90, 90, 90)         # leg segments
 FOOT_FREE_COLOR = (120, 120, 120) # swing feet
@@ -257,37 +257,64 @@ def log_spheres(path, centers, radii, values=None, colors=None, *, cmap="viridis
                                  fill_mode=fill_mode))
 
 
-def log_robot(path, body: SE3, theta, *, stance=ALL_PLANTED, only_stance=False,
-              hex_body=False, body_size=(0.20, 0.20, 0.05), foot_radius=0.0125,
-              leg_radius=0.005):
-    """Draw one configuration under ``path``.
+def _quat_from_z(d):
+    """Quaternions (xyzw) rotating +z onto each unit direction in ``d`` (N, 3)."""
+    d = np.asarray(d, float)
+    d = d / (np.linalg.norm(d, axis=-1, keepdims=True) + 1e-12)
+    z = np.array([0.0, 0.0, 1.0])
+    xyz = np.cross(np.broadcast_to(z, d.shape), d)             # z x d
+    w = 1.0 + d @ z                                            # (N,)
+    q = np.concatenate([xyz, w[:, None]], axis=-1)             # xyzw (unnormalized)
+    q[w < 1e-8] = np.array([1.0, 0.0, 0.0, 0.0])              # d ~ -z: 180deg about x
+    return q / (np.linalg.norm(q, axis=-1, keepdims=True) + 1e-12)
 
-    path        : str       rerun entity path.
-    body        : SE3       world pose of the base.
-    theta       : (6, 3)    joint angles [coxa, femur, tibia] per leg.
-    stance      : (F,) int  ids (0..5) of the planted legs; their feet are drawn
-                            in ``FOOT_STANCE_COLOR``, the rest in ``FOOT_FREE_COLOR``.
-    only_stance : bool      if True, draw only the ``stance`` legs.
-    hex_body    : bool      draw the hexagonal body (``log_hex``) instead of the box.
+
+def log_robot(path, body: SE3, theta, *, f=None, tau=None,
+              taumin=None, taumax=None, cmap="bwr",
+              foot_radius=0.0125, leg_radius=0.008, force_scale=0.005,
+              foot_color=FOOT_STANCE_COLOR):
+    """Draw a hexapod configuration: hex body, legs, feet, optional torque/force.
+
+    Args:
+        path: rerun entity path.
+        body: SE3 world pose of the base.
+        theta: (6, 3) joint angles [coxa, femur, tibia] per leg.
+        f: (6, 3) foot forces (world); if given, a 3D arrow is drawn at each foot.
+        tau: (6, 3) joint torques [coxa, femur, tibia]; if given, the legs are drawn
+            as capsules colored per segment by torque through ``cmap``.
+        taumin, taumax: torque color bounds; default symmetric +/- max|tau|.
+        cmap: matplotlib colormap for torque (diverging, e.g. "bwr").
+        foot_radius, leg_radius: foot-sphere / leg-capsule radii (m).
+        force_scale: arrow length per newton (m/N).
+        foot_color: RGB color for the foot spheres.
     """
-    if hex_body:
-        log_hex(path, body)
-    else:
-        log_body(path, body, body_size=body_size)
+    log_hex(path, body)                                            # hexagonal body
 
-    xpos = np.asarray(infer_joint_xpos(body, jnp.asarray(theta)))   # (6, 4, 3)
-    stance = np.asarray(stance).astype(int).reshape(-1)
-    planted = set(stance.tolist())
-    legs = stance if only_stance else np.arange(6)
+    xpos = np.asarray(infer_joint_xpos(body, jnp.asarray(theta)))  # (6, 4, 3)
+    feet = xpos[:, -1, :]                                          # (6, 3)
 
-    for fid in legs:
-        fid = int(fid)
-        pts = xpos[fid]                                             # (4, 3): shoulder..foot
-        rr.log(f"{path}/leg{fid}",
-               rr.LineStrips3D([pts], radii=leg_radius, colors=[FREE_COLOR]))
-        rr.log(f"{path}/leg{fid}/foot",
-               rr.Points3D(pts[-1:], radii=foot_radius,
-                           colors=[FOOT_STANCE_COLOR if fid in planted else FOOT_FREE_COLOR]))
+    if tau is not None:                                            # legs = capsules by torque
+        a = xpos[:, :3, :].reshape(-1, 3)                         # (18,3) segment starts
+        b = xpos[:, 1:, :].reshape(-1, 3)                         # (18,3) segment ends
+        t = np.asarray(tau).reshape(-1)                          # (18,) coxa/femur/tibia per leg
+        hi = float(np.abs(t).max()) if taumax is None else taumax
+        lo = -hi if taumin is None else taumin
+        colors = colors_from_values(t, cmap=cmap, vmin=lo, vmax=hi)
+        d = b - a
+        rr.log(f"{path}/legs", rr.Capsules3D(
+            lengths=np.linalg.norm(d, axis=-1), radii=leg_radius, translations=a,
+            quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(d)], colors=colors))
+    else:                                                          # plain gray legs
+        rr.log(f"{path}/legs",
+               rr.LineStrips3D(list(xpos), radii=leg_radius, colors=[FREE_COLOR] * 6))
+
+    rr.log(f"{path}/feet", rr.Points3D(feet, radii=foot_radius,
+                                       colors=[foot_color] * 6))   # feet = spheres
+
+    if f is not None:                                             # force arrows at the feet
+        vecs = np.asarray(f).reshape(6, 3) * force_scale
+        rr.log(f"{path}/forces",
+               rr.Arrows3D(origins=feet, vectors=vecs, colors=(255, 180, 0)))
 
 
 def log_poses(path, bodies: SE3, thetas, *, timeline="pose", **kw):
@@ -307,41 +334,36 @@ def log_poses(path, bodies: SE3, thetas, *, timeline="pose", **kw):
         log_robot(path, bodies[i], thetas[i], **kw)
 
 
-def log_trajectory(path, bodies: SE3, thetas, stances, *, timeline="t", **kw):
-    """Draw a trajectory under ``path`` on a scrubbable timeline, per-frame stance.
+def log_trajectory(path, bodies: SE3, thetas, *, timeline="t", **kw):
+    """Draw a trajectory under ``path`` on a scrubbable timeline.
 
     path    : str              rerun entity path.
     bodies  : SE3 batch (N,)   one base pose per frame.
     thetas  : (N, 6, 3)        per-frame joint angles.
-    stances : (N, F) int, or a length-N sequence of (F_i,) int arrays -- the
-              planted leg ids at each frame (F may vary per frame if a sequence).
 
-    Extra kwargs (``only_stance``, ...) forward to :func:`log_robot`.
+    Each frame is logged at time index i on ``timeline``. Extra kwargs
+    (``tau``, ``f``, ...) forward to :func:`log_robot`.
     """
     thetas = jnp.asarray(thetas)
     for i in range(thetas.shape[0]):
         set_time(i, timeline=timeline)
-        log_robot(path, bodies[i], thetas[i], stance=stances[i], **kw)
+        log_robot(path, bodies[i], thetas[i], **kw)
 
 
-def log_stack(path, bodies: SE3, thetas, stances=None, *, hex_body=True, **kw):
+def log_stack(path, bodies: SE3, thetas, **kw):
     """Overlay N configurations at a single time, each on its own sub-path.
 
-    path     : str              base rerun entity path.
-    bodies   : SE3 batch (N,)   one base pose per robot.
-    thetas   : (N, 6, 3)        per-robot joint angles.
-    stances  : (N, F) int / length-N sequence / None   per-robot planted leg ids
-               (None -> all legs planted for every robot).
-    hex_body : bool             draw the hexagonal body (default) vs the box.
+    path    : str              base rerun entity path.
+    bodies  : SE3 batch (N,)   one base pose per robot.
+    thetas  : (N, 6, 3)        per-robot joint angles.
 
     Unlike :func:`log_trajectory`, all robots are drawn at once (distinct
     ``{path}/{i}`` paths) rather than across a timeline. Extra kwargs
-    (``only_stance``, ``body_size``, ...) forward to :func:`log_robot`.
+    (``tau``, ``f``, ...) forward to :func:`log_robot`.
     """
     thetas = jnp.asarray(thetas)
     for i in range(thetas.shape[0]):
-        stance = ALL_PLANTED if stances is None else stances[i]
-        log_robot(f"{path}/{i}", bodies[i], thetas[i], stance=stance, hex_body=hex_body, **kw)
+        log_robot(f"{path}/{i}", bodies[i], thetas[i], **kw)
 
 
 def _demo(connect=8812):
@@ -350,7 +372,7 @@ def _demo(connect=8812):
     zs = jnp.linspace(0.18, 0.28, n)                                  # sweep body height
     bodies = SE3.from_translation(jnp.stack([jnp.zeros(n), jnp.zeros(n), zs], axis=-1))
     thetas = jnp.broadcast_to(jnp.array([0.0, 0.0523599, 1.46608]), (n, 6, 3))
-    log_poses("world", bodies, thetas, stance=jnp.array([0, 2, 4]))
+    log_poses("world", bodies, thetas)
     print(f"streamed {n} poses -> rerun on port {connect}")
 
 
