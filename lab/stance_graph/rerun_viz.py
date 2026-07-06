@@ -107,7 +107,15 @@ def _hex_prism(radius=0.15, thickness=0.05):
     for i in range(6):                                       # side quads -> 2 tris each
         j = (i + 1) % 6
         faces += [[i, j, 6 + j], [i, 6 + j, 6 + i]]
-    return verts, np.array(faces, dtype=int)
+    faces = np.array(faces, dtype=int)
+
+    # orient every triangle outward (convex prism, centroid at origin) so the
+    # vertex normals -- hence the lighting -- come out right.
+    tris = verts[faces]
+    fn = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    inward = np.einsum("ij,ij->i", fn, tris.mean(1)) < 0
+    faces[inward] = faces[inward][:, ::-1]
+    return verts, faces
 
 
 def _vertex_normals(verts, faces):
