@@ -155,6 +155,38 @@ def sweep_throughput(cfg, mjx_model, foot_ids, qpos, stances):
     return {k: np.asarray(v) for k, v in rows.items()}
 
 
+def sweep_scoring(cfg, mjx_model, foot_ids, qpos, stances):
+    """Time the static force 'scoring' (``stance_forces_batch``) across batch sizes.
+
+    This is a proxy for how long it takes to *score* a posture (body + theta): the
+    static forces are what a score would be built from. No stepping -- one
+    ``mjx.forward`` + solve per posture.
+
+    Returns:
+        dict of equal-length arrays: batch, cold_s, warm_s, postures_per_s,
+        us_per_posture (warm). ``cold_s`` includes JIT compile; ``warm_s`` is the
+        fastest of the ``repeats`` compiled runs.
+    """
+    fn = jax.jit(lambda q, s: stance_forces_batch(mjx_model, foot_ids, q, s))
+    rows = {k: [] for k in ("batch", "cold_s", "warm_s", "postures_per_s", "us_per_posture")}
+    for B in _ints(cfg.batch_sizes):
+        qb, sb = _tile_to(qpos, B), _tile_to(stances, B)
+        t0 = time.perf_counter()
+        jax.block_until_ready(fn(qb, sb))                          # cold: JIT compile + first run
+        cold_s = time.perf_counter() - t0
+        warm_s = np.inf
+        for _ in range(cfg.repeats):                               # warm: compiled
+            t0 = time.perf_counter()
+            jax.block_until_ready(fn(qb, sb))
+            warm_s = min(warm_s, time.perf_counter() - t0)
+        pps, ups = B / warm_s, warm_s / B * 1e6
+        for k, v in zip(rows, (B, cold_s, warm_s, pps, ups)):
+            rows[k].append(v)
+        print(f"  score B={B:>6}  cold={cold_s:6.2f}s warm={warm_s*1e3:8.2f}ms  "
+              f"{pps/1e6:6.3f} M postures/s  {ups:7.2f} us/posture")
+    return {k: np.asarray(v) for k, v in rows.items()}
+
+
 # --------------------------------------------------------------------------- #
 # Experiment                                                                  #
 # --------------------------------------------------------------------------- #
@@ -163,6 +195,8 @@ def run(cfg: Cfg, ctx: RunContext):
     print(f"[bench] device: {jax.devices()[0].platform.upper()}  ->  {ctx.out}")
     key = jax.random.PRNGKey(cfg.seed)
     mjx_model, foot_ids = load_model()
+    dt = float(mjx_model.opt.timestep)
+    print(f"[bench] sim dt = {dt * 1e3:.3f} ms  ({1.0 / dt:.0f} Hz)")
 
     # 1. postures
     bodies, theta, feet, stance_mask, mesh = sample_postures(cfg, key)
@@ -171,11 +205,13 @@ def run(cfg: Cfg, ctx: RunContext):
     stances = jnp.broadcast_to(stance_mask, (K, 6))
     print(f"[bench] sampled {K} valid postures  (stance {np.asarray(cfg.stance)})")
 
-    # 2. static forces (this is what we save with each posture)
+    # 2. static forces = "scoring" a posture (body + theta). Compute (to save), and time.
     foot_forces, joint_torques = jax.jit(stance_forces_batch)(mjx_model, foot_ids, qpos, stances)
     jax.block_until_ready(foot_forces)
+    print("[bench] force 'scoring' throughput (stance_forces_batch):")
+    scoring = sweep_scoring(cfg, mjx_model, foot_ids, qpos, stances)
 
-    # 3. throughput sweep
+    # 3. weld-and-settle throughput
     print("[bench] weld-and-settle throughput:")
     sweep = sweep_throughput(cfg, mjx_model, foot_ids, qpos, stances)
 
@@ -196,21 +232,26 @@ def run(cfg: Cfg, ctx: RunContext):
              mesh_verts=np.asarray(V), mesh_faces=np.asarray(F), mesh_normals=np.asarray(FN),
              **postures)
     np.savez(results / "throughput.npz", **sweep)
+    np.savez(results / "scoring.npz", **scoring)
 
     peak = float(sweep["env_steps_per_s"].max())
+    score_pps = float(scoring["postures_per_s"].max())
     max_tau = float(np.abs(np.asarray(joint_torques)).max())
-    _write_summary(results / "summary.txt", cfg, ctx, postures, sweep, peak, max_tau)
+    _write_summary(results / "summary.txt", cfg, ctx, dt, postures, scoring, sweep, peak, max_tau)
 
-    print(f"[bench] peak {peak/1e6:.2f} M env-steps/s | {K} postures | max |tau| {max_tau:.2f} Nm")
-    return {"n_postures": K, "peak_env_steps_per_s": peak, "max_abs_torque": max_tau}
+    print(f"[bench] peak {peak/1e6:.2f} M env-steps/s | scoring {score_pps/1e6:.3f} M postures/s "
+          f"| {K} postures | max |tau| {max_tau:.2f} Nm")
+    return {"n_postures": K, "sim_dt": dt, "peak_env_steps_per_s": peak,
+            "peak_score_postures_per_s": score_pps, "max_abs_torque": max_tau}
 
 
-def _write_summary(path, cfg, ctx, postures, sweep, peak, max_tau):
+def _write_summary(path, cfg, ctx, dt, postures, scoring, sweep, peak, max_tau):
     """Write a human-readable summary of the saved array shapes + sweep runtimes."""
     K = postures["theta"].shape[0]
     lines = [
         f"mjx_stance_bench   device={jax.devices()[0].platform.upper()}   id={ctx.id}",
-        "=" * 68,
+        "=" * 72,
+        f"sim dt: {dt * 1e3:.3f} ms  ({1.0 / dt:.0f} Hz)",
         f"postures: {K}   stance(planted legs): {np.flatnonzero(postures['stance_mask']).tolist()}",
         f"max |joint torque|: {max_tau:.2f} Nm",
         "",
@@ -220,13 +261,24 @@ def _write_summary(path, cfg, ctx, postures, sweep, peak, max_tau):
               for name, a in postures.items()]
     lines += [
         "",
-        "throughput (weld-and-settle)   cold = first run incl. JIT compile; warm = compiled:",
-        f"  {'batch':>8} {'steps':>7} {'cold[s]':>10} {'warm[ms]':>10} {'M env-steps/s':>15}",
+        "force scoring (stance_forces_batch, statics -- 0 steps)   cold incl. JIT compile:",
+        f"  {'batch':>8} {'cold[s]':>10} {'warm[ms]':>10} {'M postures/s':>14} {'us/posture':>12}",
+    ]
+    for b, c, r, pps, ups in zip(scoring["batch"], scoring["cold_s"], scoring["warm_s"],
+                                 scoring["postures_per_s"], scoring["us_per_posture"]):
+        lines.append(f"  {int(b):>8} {c:>10.2f} {r*1e3:>10.2f} {pps/1e6:>14.3f} {ups:>12.2f}")
+    lines += [
+        "",
+        "weld-and-settle throughput   cold = first run incl. JIT compile; warm = compiled:",
+        f"  {'batch':>8} {'steps':>7} {'sim[ms]':>9} {'cold[s]':>10} {'warm[ms]':>10} {'M env-steps/s':>15}",
     ]
     for b, s, c, r, sps in zip(sweep["batch"], sweep["steps"], sweep["cold_s"],
                                sweep["warm_s"], sweep["env_steps_per_s"]):
-        lines.append(f"  {int(b):>8} {int(s):>7} {c:>10.2f} {r*1e3:>10.1f} {sps/1e6:>15.2f}")
-    lines += ["", f"peak (warm): {peak/1e6:.2f} M env-steps/s", ""]
+        lines.append(f"  {int(b):>8} {int(s):>7} {int(s)*dt*1e3:>9.1f} "
+                     f"{c:>10.2f} {r*1e3:>10.1f} {sps/1e6:>15.2f}")
+    lines += ["",
+              f"peak settle (warm): {peak/1e6:.2f} M env-steps/s",
+              f"peak scoring (warm): {scoring['postures_per_s'].max()/1e6:.3f} M postures/s", ""]
     path.write_text("\n".join(lines))
 
 
