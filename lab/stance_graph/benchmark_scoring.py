@@ -22,7 +22,7 @@ import jax.numpy as jnp
 from runkit import experiment, RunContext, main
 
 from lab.stance_graph.mjx_stance import MODEL, load_model, to_qpos, stance_forces_batch
-from lab.stance_graph.benchmark import sample_postures, sweep_scoring
+from lab.stance_graph.benchmark import sample_postures, sweep_scoring, summary_header, _append
 
 
 @dataclass
@@ -44,49 +44,23 @@ class Cfg:
     repeats: int = 3
 
 
-def _write_summary(path, ctx, postures, scoring, max_tau):
-    """Write a human-readable summary of the postures + scoring runtimes."""
-    K = postures["theta"].shape[0]
-    lines = [
-        f"mjx_scoring_bench   device={jax.devices()[0].platform.upper()}   id={ctx.id}",
-        "=" * 72,
-        f"postures: {K}   stance(planted legs): {np.flatnonzero(postures['stance_mask']).tolist()}",
-        f"max |joint torque|: {max_tau:.2f} Nm",
-        "",
-        "arrays (postures.npz):",
-    ]
-    lines += [f"  {name:<15} {str(tuple(a.shape)):<14} {a.dtype}"
-              for name, a in postures.items()]
-    lines += [
-        "",
-        "force scoring (stance_forces_batch, statics -- 0 steps)   cold incl. JIT compile:",
-        f"  {'batch':>8} {'cold[s]':>10} {'warm[ms]':>10} {'M postures/s':>14} {'us/posture':>12}",
-    ]
-    for b, c, r, pps, ups in zip(scoring["batch"], scoring["cold_s"], scoring["warm_s"],
-                                 scoring["postures_per_s"], scoring["us_per_posture"]):
-        lines.append(f"  {int(b):>8} {c:>10.2f} {r*1e3:>10.2f} {pps/1e6:>14.3f} {ups:>12.2f}")
-    lines += ["", f"peak scoring (warm): {scoring['postures_per_s'].max()/1e6:.3f} M postures/s", ""]
-    path.write_text("\n".join(lines))
-
-
 @experiment(name="mjx_scoring_bench")
 def run(cfg: Cfg, ctx: RunContext):
     print(f"[score] device: {jax.devices()[0].platform.upper()}  ->  {ctx.out}")
     key = jax.random.PRNGKey(cfg.seed)
     mjx_model, foot_ids = load_model()
+    dt = float(mjx_model.opt.timestep)
 
     bodies, theta, feet, stance_mask, _ = sample_postures(cfg, key)
     K = int(theta.shape[0])
     qpos = to_qpos(bodies, theta)
     stances = jnp.broadcast_to(stance_mask, (K, 6))
     print(f"[score] sampled {K} valid postures  (stance {np.asarray(cfg.stance)})")
-
-    # compute the forces (to save) then time the scoring across batch sizes
     foot_forces, joint_torques = jax.jit(stance_forces_batch)(mjx_model, foot_ids, qpos, stances)
     jax.block_until_ready(foot_forces)
-    print("[score] force scoring throughput (stance_forces_batch):")
-    scoring = sweep_scoring(cfg, mjx_model, foot_ids, qpos, stances)
+    max_tau = float(np.abs(np.asarray(joint_torques)).max())
 
+    # persist postures + summary header UP FRONT
     results = ctx.out / "results"
     results.mkdir(parents=True, exist_ok=True)
     postures = {
@@ -99,11 +73,17 @@ def run(cfg: Cfg, ctx: RunContext):
         "stance_mask": np.asarray(stance_mask),
     }
     np.savez(results / "postures.npz", model=str(MODEL.name), **postures)
+    summary = results / "summary.txt"
+    summary_header(summary, "mjx_scoring_bench", ctx, dt, postures, max_tau)
+
+    # scoring sweep -- appends each row as it completes
+    print("[score] force scoring throughput (stance_forces_batch):")
+    scoring = sweep_scoring(cfg, mjx_model, foot_ids, qpos, stances,
+                            summary=summary, csv=results / "scoring.csv")
     np.savez(results / "scoring.npz", **scoring)
 
     score_pps = float(scoring["postures_per_s"].max())
-    max_tau = float(np.abs(np.asarray(joint_torques)).max())
-    _write_summary(results / "summary.txt", ctx, postures, scoring, max_tau)
+    _append(summary, "", f"peak scoring (warm): {score_pps/1e6:.3f} M postures/s")
 
     print(f"[score] peak {score_pps/1e6:.3f} M postures/s | {K} postures | max |tau| {max_tau:.2f} Nm")
     return {"n_postures": K, "peak_score_postures_per_s": score_pps, "max_abs_torque": max_tau}
