@@ -26,6 +26,7 @@ from jaxlie import SE3
 
 from lab.stance_graph.kinematics import infer_joint_xpos
 
+BODY_COLOR = (66, 135, 245)       # hex body
 FREE_COLOR = (90, 90, 90)         # leg segments
 FOOT_FREE_COLOR = (120, 120, 120) # swing feet
 FOOT_STANCE_COLOR = (255, 66, 249)  # planted feet
@@ -109,7 +110,17 @@ def _hex_prism(radius=0.15, thickness=0.05):
     return verts, np.array(faces, dtype=int)
 
 
-def log_hex(path, body: SE3, *, color=(66, 135, 245), radius=0.15, thickness=0.05,
+def _vertex_normals(verts, faces):
+    """Smooth per-vertex normals (area-weighted face normals, accumulated)."""
+    verts, faces = np.asarray(verts, float), np.asarray(faces)
+    tris = verts[faces]
+    fn = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])   # area-weighted (unnormalized)
+    n = np.zeros_like(verts)
+    np.add.at(n, faces.reshape(-1), np.repeat(fn, 3, axis=0))
+    return n / (np.linalg.norm(n, axis=1, keepdims=True) + 1e-12)
+
+
+def log_hex(path, body: SE3, *, color=BODY_COLOR, radius=0.15, thickness=0.05,
             edge_color=(40, 40, 40)):
     """Draw the hexagonal robot body (a hexagonal prism) at ``body``'s pose.
 
@@ -122,10 +133,11 @@ def log_hex(path, body: SE3, *, color=(66, 135, 245), radius=0.15, thickness=0.0
         edge_color: wireframe edge color; None to skip.
     """
     verts, faces = _hex_prism(radius, thickness)
+    normals = _vertex_normals(verts, faces)                    # so it shades like the legs
     t = np.asarray(body.translation())
     q_xyzw = np.asarray(body.rotation().as_quaternion_xyzw())
     rr.log(f"{path}/hex", rr.Transform3D(translation=t, rotation=rr.Quaternion(xyzw=q_xyzw)))
-    log_mesh(f"{path}/hex/body", verts, faces, color=color, edge_color=edge_color)
+    log_mesh(f"{path}/hex/body", verts, faces, color=color, normals=normals, edge_color=edge_color)
 
 
 def colors_from_values(values, *, cmap="viridis", vmin=None, vmax=None):
