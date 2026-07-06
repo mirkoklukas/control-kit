@@ -310,7 +310,8 @@ def log_robot(path, body: SE3, theta, *, f=None, tau=None,
     d = b - a
     rr.log(f"{path}/legs", rr.Capsules3D(                        # legs = capsules
         lengths=np.linalg.norm(d, axis=-1), radii=leg_radius, translations=a,
-        quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(d)], colors=colors))
+        quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(d)],
+        colors=colors, fill_mode="solid"))
 
     if f is not None:                                             # color feet by force magnitude
         mag = np.linalg.norm(np.asarray(f).reshape(6, 3), axis=-1)
