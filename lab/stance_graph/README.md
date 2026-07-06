@@ -20,6 +20,52 @@ Both sample the same postures and save them with their static joint torques +
 foot reaction forces (from `mjx_stance`). The forces are what a score would be
 built from, so the scoring timing is a proxy for scoring throughput.
 
+## What scoring computes (static stance forces)
+
+`mjx_stance.stance_forces` reads the joint torques and foot reaction forces that
+hold a posture (body pose + joint angles, some feet planted) in static
+equilibrium. Start from the equation of motion in generalized coordinates `q`
+(here `nv = 24`: 6 free-joint base dofs + 18 leg-joint dofs):
+
+$$M(q)\,\ddot q + c(q,\dot q) = \tau + \sum_i J_i(q)^\top f_i,$$
+
+where `c` is the bias force (Coriolis + centrifugal + gravity; MuJoCo's
+`qfrc_bias`), `τ` the actuator generalized forces, `f_i` the reaction force at
+planted foot `i`, and `J_i = ∂x_i/∂q ∈ ℝ^{3×nv}` its translational Jacobian
+(`δx_i = J_i δq`). Setting `q̇ = 0` and `q̈ = 0` drops the inertial and velocity
+terms and leaves just the gravity load `g := c(q, 0)`:
+
+$$g = \tau + \sum_i J_i^\top f_i.$$
+
+Split this by dof. The 6 base dofs are unactuated (`τ_base = 0`), so the planted
+feet alone must carry the body's gravity wrench — solve those rows for the forces:
+
+$$\sum_i J_{i,\text{base}}^\top\, f_i = g_\text{base}.$$
+
+The joint torques then follow from the remaining rows:
+
+$$\tau = g_\text{joint} - \sum_i J_{i,\text{joint}}^\top\, f_i.$$
+
+So the whole thing is one `mjx.forward` (for `g` and the Jacobians), a small
+least-squares on the base rows (minimum-norm when 3+ feet make it
+underdetermined), and a matrix–vector product for `τ` — no stepping, and
+differentiable. A planted foot whose vertical reaction comes out `≤ 0` would have
+to be *pulled* onto the surface: a tip-over on the ground, but fine if that foot
+is welded / gripping (e.g. on a wall).
+
+**Convention note.** Here `J = ∂x/∂q` has the standard shape `(3, nv)`
+(`δx = J δq`). `mjx.jac` returns its **transpose**, `J^\top` of shape `(nv, 3)`,
+which is the handy layout because the generalized force from a foot force is
+exactly `J^\top f` — a plain matrix–vector product (`Jp @ f` in the code, no
+transpose needed).
+
+**No welds needed.** Scoring never touches the model's equality constraints (the
+`wf*` welds in `weld0.xml`): it solves `J^\top f = g_base` algebraically, with the
+welds inactive throughout. `stance_forces` gives identical results on a model with
+no `<equality>` block — "planted" is purely the `stance` mask (which feet's
+Jacobians enter the balance), not a physical weld. The welds matter only for
+`mjx_weld`, the dynamics cross-check that activates them and steps physics.
+
 ## Run
 
 Scoring only (start here):

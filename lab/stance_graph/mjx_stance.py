@@ -94,6 +94,45 @@ def stance_forces(mjx_model, foot_ids, qpos, stance):
     return f, tau.reshape(-1, 3)
 
 
+def stance_wrenches(mjx_model, foot_ids, qpos, stance):
+    """Static 6-DOF version of :func:`stance_forces`: each planted foot may exert a
+    full **wrench** (force + moment), as with a ``torquescale>0`` weld / a rigid
+    grip that resists the foot twisting.
+
+    Same statics as ``stance_forces`` but each foot contributes ``Jp^T f + Jr^T m``
+    (translational Jacobian times force, plus rotational Jacobian times moment), so
+    the per-foot unknown is a 6-vector ``[f, m]``. Solving the base rows now
+    distributes the load into moments too (even more underdetermined -> min-norm).
+
+    Args:
+        mjx_model: the ``put_model``'d model.
+        foot_ids: (6,) foot body ids.
+        qpos: (nq,) configuration.
+        stance: (6,) bool -- True = that leg's foot is planted (grips).
+
+    Returns:
+        foot_forces: (6, 3) world-frame reaction force per foot.
+        foot_moments: (6, 3) world-frame reaction moment per foot.
+        joint_torques: (6, 3) actuator torque [coxa, femur, tibia] per leg.
+    """
+    nv, nf = mjx_model.nv, foot_ids.shape[0]
+    d = mjx.forward(mjx_model, mjx.make_data(mjx_model).replace(
+        qpos=qpos, qvel=jnp.zeros(nv)))
+    g = d.qfrc_bias
+    # per foot: [Jp | Jr] -> (nv, 6); columns 0:3 map force, 3:6 map moment.
+    Jw = jax.vmap(lambda fid: jnp.concatenate(
+        mjx.jac(mjx_model, d, d.xpos[fid], fid), axis=-1))(foot_ids)    # (6, nv, 6)
+    w = stance.astype(g.dtype)
+
+    # base rows: sum_i w_i Jw[i,:6,:] @ x_i = g[:6],  x_i = [f_i(3), m_i(3)]
+    M = jnp.transpose(Jw[:, :6, :] * w[:, None, None], (1, 0, 2)).reshape(6, 6 * nf)
+    x = jnp.linalg.lstsq(M, g[:6])[0].reshape(nf, 6) * w[:, None]       # (6, 6)
+
+    # joint rows: tau = g_joint - sum_i Jw[i,6:,:] @ x_i
+    tau = g[6:] - jnp.einsum("inj,ij->n", Jw[:, 6:, :], x)
+    return x[:, :3], x[:, 3:], tau.reshape(-1, 3)
+
+
 def stance_forces_batch(mjx_model, foot_ids, qpos, stances):
     """Vectorized :func:`stance_forces` over N postures.
 
@@ -107,6 +146,21 @@ def stance_forces_batch(mjx_model, foot_ids, qpos, stances):
         foot_forces: (N, 6, 3), joint_torques: (N, 6, 3).
     """
     return jax.vmap(lambda q, s: stance_forces(mjx_model, foot_ids, q, s))(qpos, stances)
+
+
+def stance_wrenches_batch(mjx_model, foot_ids, qpos, stances):
+    """Vectorized :func:`stance_wrenches` over N postures.
+
+    Args:
+        mjx_model: the ``put_model``'d model.
+        foot_ids: (6,) foot body ids.
+        qpos: (N, nq) configurations.
+        stances: (N, 6) bool planted masks.
+
+    Returns:
+        foot_forces: (N, 6, 3), foot_moments: (N, 6, 3), joint_torques: (N, 6, 3).
+    """
+    return jax.vmap(lambda q, s: stance_wrenches(mjx_model, foot_ids, q, s))(qpos, stances)
 
 
 if __name__ == "__main__":
