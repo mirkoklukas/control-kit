@@ -181,24 +181,51 @@ def run(cfg: Cfg, ctx: RunContext):
     results = ctx.out / "results"
     results.mkdir(parents=True, exist_ok=True)
     V, F, FN = mesh
-    np.savez(
-        results / "postures.npz",
-        body_wxyz_xyz=np.asarray(bodies.wxyz_xyz),   # (K, 7) qw qx qy qz x y z
-        qpos=np.asarray(qpos),                        # (K, nq)
-        theta=np.asarray(theta),                      # (K, 6, 3)
-        feet=np.asarray(feet),                        # (K, 6, 3)
-        foot_forces=np.asarray(foot_forces),          # (K, 6, 3) world
-        joint_torques=np.asarray(joint_torques),      # (K, 6, 3) coxa/femur/tibia
-        stance_mask=np.asarray(stance_mask),          # (6,) bool
-        mesh_verts=np.asarray(V), mesh_faces=np.asarray(F), mesh_normals=np.asarray(FN),
-        model=str(MODEL.name),
-    )
+    postures = {
+        "body_wxyz_xyz": np.asarray(bodies.wxyz_xyz),   # (K, 7) qw qx qy qz x y z
+        "qpos": np.asarray(qpos),                        # (K, nq)
+        "theta": np.asarray(theta),                      # (K, 6, 3)
+        "feet": np.asarray(feet),                        # (K, 6, 3)
+        "foot_forces": np.asarray(foot_forces),          # (K, 6, 3) world
+        "joint_torques": np.asarray(joint_torques),      # (K, 6, 3) coxa/femur/tibia
+        "stance_mask": np.asarray(stance_mask),          # (6,) bool
+    }
+    np.savez(results / "postures.npz", model=str(MODEL.name),
+             mesh_verts=np.asarray(V), mesh_faces=np.asarray(F), mesh_normals=np.asarray(FN),
+             **postures)
     np.savez(results / "throughput.npz", **sweep)
 
     peak = float(sweep["env_steps_per_s"].max())
     max_tau = float(np.abs(np.asarray(joint_torques)).max())
+    _write_summary(results / "summary.txt", cfg, ctx, postures, sweep, peak, max_tau)
+
     print(f"[bench] peak {peak/1e6:.2f} M env-steps/s | {K} postures | max |tau| {max_tau:.2f} Nm")
     return {"n_postures": K, "peak_env_steps_per_s": peak, "max_abs_torque": max_tau}
+
+
+def _write_summary(path, cfg, ctx, postures, sweep, peak, max_tau):
+    """Write a human-readable summary of the saved array shapes + sweep runtimes."""
+    K = postures["theta"].shape[0]
+    lines = [
+        f"mjx_stance_bench   device={jax.devices()[0].platform.upper()}   id={ctx.id}",
+        "=" * 68,
+        f"postures: {K}   stance(planted legs): {np.flatnonzero(postures['stance_mask']).tolist()}",
+        f"max |joint torque|: {max_tau:.2f} Nm",
+        "",
+        "arrays (postures.npz):",
+    ]
+    lines += [f"  {name:<15} {str(tuple(a.shape)):<14} {a.dtype}"
+              for name, a in postures.items()]
+    lines += [
+        "",
+        "throughput (weld-and-settle):",
+        f"  {'batch':>8} {'steps':>7} {'compile[s]':>12} {'run[ms]':>10} {'M env-steps/s':>15}",
+    ]
+    for b, s, c, r, sps in zip(sweep["batch"], sweep["steps"], sweep["compile_s"],
+                               sweep["run_s"], sweep["env_steps_per_s"]):
+        lines.append(f"  {int(b):>8} {int(s):>7} {c:>12.2f} {r*1e3:>10.1f} {sps/1e6:>15.2f}")
+    lines += ["", f"peak: {peak/1e6:.2f} M env-steps/s", ""]
+    path.write_text("\n".join(lines))
 
 
 if __name__ == "__main__":
