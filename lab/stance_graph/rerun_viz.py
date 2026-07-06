@@ -271,6 +271,7 @@ def _quat_from_z(d):
 
 def log_robot(path, body: SE3, theta, *, f=None, tau=None,
               taumin=None, taumax=None, cmap="bwr",
+              fmin=None, fmax=None, fcmap="viridis",
               foot_radius=0.0125, leg_radius=0.008, force_scale=0.005,
               foot_color=FOOT_STANCE_COLOR):
     """Draw a hexapod configuration: hex body, legs, feet, optional torque/force.
@@ -279,14 +280,18 @@ def log_robot(path, body: SE3, theta, *, f=None, tau=None,
         path: rerun entity path.
         body: SE3 world pose of the base.
         theta: (6, 3) joint angles [coxa, femur, tibia] per leg.
-        f: (6, 3) foot forces (world); if given, a 3D arrow is drawn at each foot.
+        f: (6, 3) foot forces (world); if given, a 3D arrow is drawn at each foot
+            and the foot spheres are colored by force magnitude through ``fcmap``
+            (else flat ``foot_color``).
         tau: (6, 3) joint torques [coxa, femur, tibia]; if given, the leg capsules
             are colored per segment by torque through ``cmap`` (else flat gray).
         taumin, taumax: torque color bounds; default symmetric +/- max|tau|.
         cmap: matplotlib colormap for torque (diverging, e.g. "bwr").
+        fmin, fmax: foot-force color bounds; default 0 .. max|f|.
+        fcmap: matplotlib colormap for foot force magnitude (sequential).
         foot_radius, leg_radius: foot-sphere / leg-capsule radii (m).
         force_scale: arrow length per newton (m/N).
-        foot_color: RGB color for the foot spheres.
+        foot_color: RGB color for the foot spheres when ``f`` is not given.
     """
     log_hex(path, body)                                            # hexagonal body
 
@@ -307,8 +312,14 @@ def log_robot(path, body: SE3, theta, *, f=None, tau=None,
         lengths=np.linalg.norm(d, axis=-1), radii=leg_radius, translations=a,
         quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(d)], colors=colors))
 
-    rr.log(f"{path}/feet", rr.Points3D(feet, radii=foot_radius,
-                                       colors=[foot_color] * 6))   # feet = spheres
+    if f is not None:                                             # color feet by force magnitude
+        mag = np.linalg.norm(np.asarray(f).reshape(6, 3), axis=-1)
+        lo = 0.0 if fmin is None else fmin
+        hi = float(mag.max()) if fmax is None else fmax
+        foot_colors = colors_from_values(mag, cmap=fcmap, vmin=lo, vmax=hi)
+    else:                                                         # flat color
+        foot_colors = np.tile(np.array(foot_color, np.uint8), (6, 1))
+    rr.log(f"{path}/feet", rr.Points3D(feet, radii=foot_radius, colors=foot_colors))
 
     if f is not None:                                             # force arrows at the feet
         vecs = np.asarray(f).reshape(6, 3) * force_scale
