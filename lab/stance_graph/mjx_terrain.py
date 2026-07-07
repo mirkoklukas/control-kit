@@ -16,13 +16,16 @@ tessellated, so a terrain **mesh** in the model XML is sampled directly:
 ``pool_from_geom(model_xml, "terrain")`` area-samples a single named geom with no
 region clip. ``build_pool(region=None)`` does the same over all world-body geoms.
 
-Run under ``uv run --extra mjx`` (needs only mujoco + numpy).
+Run under ``uv run --extra mjx``. The geom-pool path is plain mujoco + numpy;
+``sample_mesh`` (explicit-mesh sampling) is jax and takes a PRNG key.
 """
 from __future__ import annotations
 
 from pathlib import Path
 
 import numpy as np
+import jax
+import jax.numpy as jnp
 import mujoco
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -263,29 +266,35 @@ def pool_from_geom(model_path, geom_name, M=20000, drop_underside=True, seed=0):
 # --------------------------------------------------------------------------- #
 # Explicit sampling meshes (authored surfaces, not part of the simulation)     #
 # --------------------------------------------------------------------------- #
-def sample_mesh(vertices, faces, M=20000, seed=0):
-    """Area-uniform pool from an explicit triangle mesh.
+def sample_mesh(key, vertices, faces, M=20000):
+    """Area-uniform pool from an explicit triangle mesh (jax).
 
     A sampling-only surface: hand it any ``(vertices, faces)`` (in-code, or loaded
     from an ``.obj``) and it area-samples the triangles. Nothing to do with the
     physics scene -- useful to define exactly the region footholds may land on.
 
     Args:
+        key: jax PRNG key.
         vertices: (V, 3) mesh vertices.
         faces: (F, 3) int triangle vertex indices.
         M: number of pool points to return.
-        seed: RNG seed.
 
     Returns:
         xyz: (M, 3) surface points.
         normal: (M, 3) unit face normal at each point (from the vertex winding).
     """
-    verts = np.asarray(vertices, dtype=float)
-    faces = np.asarray(faces, dtype=int)
-    tris = verts[faces]                                         # (F, 3, 3)
-    n = np.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
-    n /= np.linalg.norm(n, axis=1, keepdims=True) + 1e-12
-    return _sample_tris(np.random.default_rng(seed), tris, n, M)
+    tris = jnp.asarray(vertices)[jnp.asarray(faces)]           # (F, 3, 3)
+    nrm = jnp.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    areas = 0.5 * jnp.linalg.norm(nrm, axis=1)
+    nrm = nrm / (jnp.linalg.norm(nrm, axis=1, keepdims=True) + 1e-12)
+
+    k_tri, k_bary = jax.random.split(key)
+    idx = jax.random.choice(k_tri, tris.shape[0], (M,), p=areas / areas.sum())
+    uv = jax.random.uniform(k_bary, (M, 2))
+    uv = jnp.where(uv.sum(1, keepdims=True) > 1.0, 1.0 - uv, uv)   # fold into the triangle
+    v0, v1, v2 = tris[idx, 0], tris[idx, 1], tris[idx, 2]
+    pts = v0 + uv[:, :1] * (v1 - v0) + uv[:, 1:] * (v2 - v0)
+    return pts, nrm[idx]
 
 
 def _add_quad(verts, faces, corners):

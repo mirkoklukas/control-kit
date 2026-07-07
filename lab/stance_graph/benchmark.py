@@ -78,9 +78,9 @@ def sample_postures(cfg: Cfg, key):
         stance_mask: (6,) bool -- planted legs (shared by all K).
         mesh: ``(V, F, FN)`` climb-surface mesh (for logging/replay).
     """
+    k_mesh, k_body, k_feet = jax.random.split(key, 3)
     V, F, FN = terrain.climb_surface()
-    xs, _ = terrain.sample_mesh(V, F, M=cfg.pool_size)
-    xs = jnp.asarray(xs)
+    xs, _ = terrain.sample_mesh(k_mesh, V, F, M=cfg.pool_size)
 
     body = from_te(jnp.asarray(cfg.body_xyz), jnp.deg2rad(jnp.asarray(cfg.body_rpy_deg)))
     stance = jnp.asarray(cfg.stance)
@@ -88,8 +88,6 @@ def sample_postures(cfg: Cfg, key):
     # per-leg reach mask over the pool, then sample S footholds per leg from it.
     shoulders = body @ SHOULDERS
     mask = jax.vmap(_leg_reach_mask, (0, None))(shoulders, xs)              # (6, M)
-
-    k_body, k_feet = jax.random.split(key)
     bodies = body_sampler(k_body, body, N=cfg.n_bodies,
                           xyz_delta=cfg.xyz_delta,
                           rpy_delta=jnp.deg2rad(cfg.rpy_delta_deg))
