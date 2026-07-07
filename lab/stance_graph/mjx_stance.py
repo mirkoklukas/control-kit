@@ -133,6 +133,49 @@ def stance_wrenches(mjx_model, foot_ids, qpos, stance):
     return x[:, :3], x[:, 3:], tau.reshape(-1, 3)
 
 
+def stance_sensitivity(mjx_model, foot_ids, qpos, stance):
+    """Static stance forces plus their sensitivity to a wrench applied to the body.
+
+    Same base-equilibrium solve as :func:`stance_forces`, but through the
+    pseudoinverse ``M+`` of ``M = J_base^T`` (the base-dof rows of the planted
+    feet's Jacobians). ``M+`` gives the nominal forces (``f = M+ g_base``) *and* the
+    linearized response to an external body wrench ``w`` -- a stance-stability map:
+    applying ``w`` perturbs the base balance by ``-w``, so ``df = -M+ w`` and
+    ``dtau = -sum_i J_joint_i @ df_i``. Small ``|dfdw|`` / staying admissible under
+    the wrenches you expect => a robust stance.
+
+    Args:
+        mjx_model: the ``put_model``'d model.
+        foot_ids: (6,) foot body ids.
+        qpos: (nq,) configuration.
+        stance: (6,) bool planted mask.
+
+    Returns:
+        foot_forces: (6, 3) nominal reaction force per foot (matches stance_forces).
+        joint_torques: (6, 3) nominal actuator torque per leg.
+        dfdw: (6, 3, 6) d(foot force) / d(body wrench). The wrench is
+            ``[Fx, Fy, Fz, Tx, Ty, Tz]`` on the base dofs (force in world frame,
+            torque in the base frame).
+        dtaudw: (6, 3, 6) d(joint torque) / d(body wrench).
+    """
+    nv, nf = mjx_model.nv, foot_ids.shape[0]
+    d = mjx.forward(mjx_model, mjx.make_data(mjx_model).replace(
+        qpos=qpos, qvel=jnp.zeros(nv)))
+    g = d.qfrc_bias
+    Jp = jax.vmap(lambda fid: mjx.jac(mjx_model, d, d.xpos[fid], fid)[0])(foot_ids)  # (nf,nv,3)
+    w = stance.astype(g.dtype)
+
+    M = jnp.transpose(Jp[:, :6, :] * w[:, None, None], (1, 0, 2)).reshape(6, 3 * nf)
+    Mpinv = jnp.linalg.pinv(M)                                  # (3nf, 6); zero rows for lifted feet
+    f = (Mpinv @ g[:6]).reshape(nf, 3)                          # nominal foot forces (= lstsq)
+    dfdw = -Mpinv.reshape(nf, 3, 6)                             # d(foot force) / d(body wrench)
+
+    Jj = Jp[:, 6:, :]                                           # (nf, nv-6, 3)
+    tau = g[6:] - jnp.einsum("inj,ij->n", Jj, f)
+    dtaudw = -jnp.einsum("inj,ijk->nk", Jj, dfdw)              # (nv-6, 6)
+    return f, tau.reshape(-1, 3), dfdw, dtaudw.reshape(-1, 3, 6)
+
+
 def stance_forces_batch(mjx_model, foot_ids, qpos, stances):
     """Vectorized :func:`stance_forces` over N postures.
 
@@ -161,6 +204,15 @@ def stance_wrenches_batch(mjx_model, foot_ids, qpos, stances):
         foot_forces: (N, 6, 3), foot_moments: (N, 6, 3), joint_torques: (N, 6, 3).
     """
     return jax.vmap(lambda q, s: stance_wrenches(mjx_model, foot_ids, q, s))(qpos, stances)
+
+
+def stance_sensitivity_batch(mjx_model, foot_ids, qpos, stances):
+    """Vectorized :func:`stance_sensitivity` over N postures.
+
+    Returns foot_forces (N,6,3), joint_torques (N,6,3), dfdw (N,6,3,6),
+    dtaudw (N,6,3,6).
+    """
+    return jax.vmap(lambda q, s: stance_sensitivity(mjx_model, foot_ids, q, s))(qpos, stances)
 
 
 if __name__ == "__main__":
