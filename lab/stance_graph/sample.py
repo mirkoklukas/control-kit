@@ -26,13 +26,34 @@ FOOT_STD = 0.1
 FOOT_SHIFT = jnp.array([0.1, 0.0, 0.0])
 
 
+def _sample_box(key, center, spec, N):
+    """Uniform samples in a box around ``center``.
+
+    ``spec`` is either a symmetric half-width (scalar or ``(3,)`` delta, so the box
+    is ``center +/- spec``) or a ``(3, 2)`` ``[lo, hi]`` offset range per axis (box
+    is ``center + [lo, hi]``, allowing asymmetric bounds). ``delta d`` == range
+    ``[-d, +d]``.
+    """
+    spec = jnp.asarray(spec)
+    if spec.ndim <= 1:                                  # scalar / (3,) delta -> symmetric
+        lo, hi = center - spec, center + spec
+    else:                                               # (3, 2) [lo, hi] offset range
+        lo, hi = center + spec[:, 0], center + spec[:, 1]
+    return jax.random.uniform(key, (N, 3), minval=lo, maxval=hi)
+
+
 def body_sampler(key, body0, xyz_delta=XYZ_DELTA, rpy_delta=RPY_DELTA, N=100):
+    """Sample ``N`` bodies uniformly in a box around ``body0``.
+
+    ``xyz_delta`` / ``rpy_delta`` are each either a ``(3,)`` symmetric half-width
+    (delta) or a ``(3, 2)`` ``[lo, hi]`` offset range per axis (see ``_sample_box``).
+    """
     x0 = body0.translation()
     rpy0 = jnp.asarray(body0.rotation().as_rpy_radians())
 
     key_xyz, key_rpy = jax.random.split(key)
-    xs = jax.random.uniform(key_xyz, (N, 3), minval=x0 - xyz_delta, maxval=x0 + xyz_delta)
-    rpys = jax.random.uniform(key_rpy, (N, 3), minval=rpy0 - rpy_delta, maxval=rpy0 + rpy_delta)
+    xs = _sample_box(key_xyz, x0, xyz_delta, N)
+    rpys = _sample_box(key_rpy, rpy0, rpy_delta, N)
     bodies = jax.vmap(from_te)(xs, rpys)
 
     return bodies
