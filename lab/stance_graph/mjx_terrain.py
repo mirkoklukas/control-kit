@@ -266,7 +266,7 @@ def pool_from_geom(model_path, geom_name, M=20000, drop_underside=True, seed=0):
 # --------------------------------------------------------------------------- #
 # Explicit sampling meshes (authored surfaces, not part of the simulation)     #
 # --------------------------------------------------------------------------- #
-def sample_mesh(key, vertices, faces, M=20000):
+def sample_mesh(key, vertices, faces,  M=20000):
     """Area-uniform pool from an explicit triangle mesh (jax).
 
     A sampling-only surface: hand it any ``(vertices, faces)`` (in-code, or loaded
@@ -277,6 +277,7 @@ def sample_mesh(key, vertices, faces, M=20000):
         key: jax PRNG key.
         vertices: (V, 3) mesh vertices.
         faces: (F, 3) int triangle vertex indices.
+        normals: (N, 3) mesh normals.
         M: number of pool points to return.
 
     Returns:
@@ -355,11 +356,23 @@ def climb_surface(model_path=MODEL, floor_x=(-1.0, 1.0), floor_y=(-2.0, 2.0),
 
     vertices = jnp.asarray(verts, dtype=float)
     faces = jnp.asarray(faces, dtype=int)
+
+    # orient every face outward -- into the free space footholds sit in -- so the
+    # normals point the right way: the floor (first quad) faces +z, the box faces
+    # point away from the box centre. Flip any triangle wound the other way.
     tris = vertices[faces]
-    fn = jnp.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])   # outward (winding)
+    fn = jnp.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
+    outward = tris.mean(1) - jnp.asarray(c)                            # box faces: away from centre
+    outward = outward / (jnp.linalg.norm(outward, axis=1, keepdims=True) + 1e-12)
+    outward = outward.at[:2].set(jnp.array([0.0, 0.0, 1.0]))          # first 2 tris = floor -> +z
+    flip = jnp.sum(fn * outward, axis=1) < 0
+    faces = jnp.where(flip[:, None], faces[:, ::-1], faces)
+
+    # per-vertex normals from the (now outward) winding
+    tris = vertices[faces]
+    fn = jnp.cross(tris[:, 1] - tris[:, 0], tris[:, 2] - tris[:, 0])
     fn = fn / (jnp.linalg.norm(fn, axis=1, keepdims=True) + 1e-12)
-    normals = jnp.zeros_like(vertices).at[faces.reshape(-1)].add(      # accumulate per vertex
-        jnp.repeat(fn, 3, axis=0))
+    normals = jnp.zeros_like(vertices).at[faces.reshape(-1)].add(jnp.repeat(fn, 3, axis=0))
     normals = normals / (jnp.linalg.norm(normals, axis=1, keepdims=True) + 1e-12)
     return vertices, faces, normals
 
