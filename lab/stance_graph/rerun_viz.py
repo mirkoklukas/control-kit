@@ -289,6 +289,30 @@ def _quat_from_z(d):
     return q / (np.linalg.norm(q, axis=-1, keepdims=True) + 1e-12)
 
 
+def log_contacts(path, positions, normals, *, size=0.03, thickness=0.004,
+                 color=(255, 180, 0)):
+    """Draw a flat box (tile) at each contact, its thin axis along the normal.
+
+    Args:
+        path: rerun entity path.
+        positions: (N, 3) contact points.
+        normals: (N, 3) surface normal at each contact (the tile lies flat on it).
+        size: tile side length (m).
+        thickness: tile thickness along the normal (m).
+        color: single RGB(A) applied to all, or a (N, 3/4) per-contact array.
+    """
+    p = np.asarray(positions, np.float32).reshape(-1, 3)
+    n = np.asarray(normals, np.float32).reshape(-1, 3)
+    half = np.tile([size / 2, size / 2, thickness / 2], (p.shape[0], 1))   # thin along local z
+    cols = np.asarray(color)
+    if cols.ndim == 1:
+        cols = np.tile(cols, (p.shape[0], 1))
+    rr.log(path, rr.Boxes3D(
+        centers=p, half_sizes=half,
+        quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(n)],   # local z -> normal
+        colors=cols, fill_mode="solid"))
+
+
 def log_robot(path, body: SE3, theta, *, f=None, tau=None,
               tmin=None, tmax=None, cmap="bwr",
               foot_radius=0.0125, leg_radius=0.008,
