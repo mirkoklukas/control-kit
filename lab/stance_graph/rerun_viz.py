@@ -290,8 +290,11 @@ def _quat_from_z(d):
 
 
 def log_contacts(path, positions, normals, *, size=0.03, thickness=0.004,
-                 color=(255, 180, 0)):
+                 cube=0.006, color=(255, 180, 0)):
     """Draw a flat box (tile) at each contact, its thin axis along the normal.
+
+    A contact whose normal has zero length (no orientation) is drawn as a tiny
+    cube instead of a flat tile.
 
     Args:
         path: rerun entity path.
@@ -299,17 +302,19 @@ def log_contacts(path, positions, normals, *, size=0.03, thickness=0.004,
         normals: (N, 3) surface normal at each contact (the tile lies flat on it).
         size: tile side length (m).
         thickness: tile thickness along the normal (m).
+        cube: side length of the tiny cube drawn where the normal is zero (m).
         color: single RGB(A) applied to all, or a (N, 3/4) per-contact array.
     """
     p = np.asarray(positions, np.float32).reshape(-1, 3)
     n = np.asarray(normals, np.float32).reshape(-1, 3)
     half = np.tile([size / 2, size / 2, thickness / 2], (p.shape[0], 1))   # thin along local z
+    half[np.linalg.norm(n, axis=1) < 1e-9] = cube / 2.0                    # zero normal -> tiny cube
     cols = np.asarray(color)
     if cols.ndim == 1:
         cols = np.tile(cols, (p.shape[0], 1))
     rr.log(path, rr.Boxes3D(
         centers=p, half_sizes=half,
-        quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(n)],   # local z -> normal
+        quaternions=[rr.Quaternion(xyzw=q) for q in _quat_from_z(n)],   # local z -> normal (identity if 0)
         colors=cols, fill_mode="solid"))
 
 
