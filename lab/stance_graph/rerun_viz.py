@@ -22,7 +22,7 @@ from pathlib import Path
 import numpy as np
 import jax.numpy as jnp
 import rerun as rr
-from jaxlie import SE3
+from jaxlie import SE3, SO3
 
 from lab.stance_graph.kinematics import infer_joint_xpos
 
@@ -366,6 +366,23 @@ def log_robot(path, body: SE3, theta, *, f=None, tau=None,
         rr.log(f"{path}/forces",
                rr.Arrows3D(origins=feet, vectors=vecs, radii=arrow_radius,
                            colors=(255, 180, 0)))
+
+
+def log_posture(path, qpos, **kw):
+    """Draw a posture given as a full ``qpos`` vector.
+
+    Splits ``qpos`` into the free-joint base pose (position + wxyz quaternion) and
+    the 18 leg joint angles, then forwards to :func:`log_robot`. Convenient for the
+    ``qpos`` representation used by ``mjx_stance`` and the benchmark postures.
+
+    Args:
+        path: rerun entity path.
+        qpos: (25,) = ``[x, y, z, qw, qx, qy, qz | 18 joint angles]``.
+        **kw: forwarded to :func:`log_robot` (``f``, ``tau``, ``tmin``, ...).
+    """
+    q = jnp.asarray(qpos)
+    body = SE3.from_rotation_and_translation(SO3(q[3:7]), q[:3])
+    log_robot(path, body, q[7:].reshape(6, 3), **kw)
 
 
 def log_poses(path, bodies: SE3, thetas, *, timeline="pose", **kw):
