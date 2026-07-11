@@ -1,0 +1,248 @@
+<mujoco model="6x4DOF">
+  <compiler angle="degree" autolimits="true"/>
+  <option timestep="0.004" integrator="implicitfast" iterations="10" ls_iterations="8"/>
+
+  <!-- viewer look: brighter headlight, no haze (reflection also off via material) -->
+  <visual>
+    <headlight ambient="0.4 0.4 0.4" diffuse="0.65 0.65 0.65" specular="0.1 0.1 0.1"/>
+    <map haze="0"/>
+  </visual>
+
+  <!-- Radial hexapod, 4 DOF per leg (24 actuated DOF). Hexagonal base with one leg
+       at each corner (30/90/150/210/270/330 deg), circumradius 0.15. Per leg the
+       chain is seg0 (yaw, z) -> seg1 (roll, x) -> seg2 (pitch, y) -> seg3 (knee, y);
+       cf. models/weld0.xml, which lacks the seg1 hip-roll. Segment lengths are
+       leg-local +x lengths at the zero pose; standing rest pose in <keyframe>. -->
+  <default>
+    <geom density="660" friction="1.0 0.5 0.5" contype="0" conaffinity="1"/>
+    <default class="hexapod">
+      <joint type="hinge" armature="0.008" damping="0.4" frictionloss="0.02"/>
+      <geom type="capsule" size="0.015"/>
+      <position kp="200" kv="6" forcerange="-8 8"/>
+      <default class="seg0">
+        <joint axis="0 0 1" range="-80 80"/>
+        <geom material="seg0"/>
+      </default>
+      <default class="seg1">
+        <joint axis="1 0 0" range="-90 90"/>
+        <geom material="seg1"/>
+      </default>
+      <default class="seg2">
+        <joint axis="0 1 0" range="-120 120"/>
+        <geom material="seg2"/>
+      </default>
+      <default class="seg3">
+        <joint axis="0 1 0" range="0 120"/>
+        <geom material="seg3"/>
+      </default>
+    </default>
+  </default>
+
+  <asset>
+    <material name="base"  rgba="1 1 1 1"/>
+    <material name="head"  rgba="0.419608 0.419608 0.419608 1"/>
+    <material name="seg0"  rgba="1 1 1 1"/>
+    <material name="seg1"  rgba="0.6 0.6 0.6 1"/>
+    <material name="seg2"  rgba="0.321569 0.321569 0.321569 1"/>
+    <material name="seg3"  rgba="0.0392157 0.760784 1 1"/>
+    <material name="foot"  rgba="1 0.258824 0.976471 1"/>
+
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2"
+             width="512" height="512"/>
+    <material name="boxmat" rgba="0.75 0.55 0.35 1"/>
+    <material name="grid" texture="grid" texrepeat="10 10" reflectance="0"/>
+    <mesh name="hexbody" vertex="
+       0.12990  0.07500  0.02500
+       0.00000  0.15000  0.02500
+      -0.12990  0.07500  0.02500
+      -0.12990 -0.07500  0.02500
+      -0.00000 -0.15000  0.02500
+       0.12990 -0.07500  0.02500
+       0.12990  0.07500 -0.02500
+       0.00000  0.15000 -0.02500
+      -0.12990  0.07500 -0.02500
+      -0.12990 -0.07500 -0.02500
+      -0.00000 -0.15000 -0.02500
+       0.12990 -0.07500 -0.02500"/>
+  </asset>
+
+  <worldbody>
+    <light pos="0 0 2.0" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <geom name="floor" type="plane" size="0 0 0.05" material="grid" contype="1" conaffinity="1"
+          priority="1" friction="2 0.5 0.5"/>
+
+    <!-- climbing box: 4x4x2 full extents, near yz-face at x=1 (center 3,0,1 half 2,2,1) -->
+    <geom name="box" type="box" pos="3 0 1" size="2 2 1"
+          material="grid" contype="1" conaffinity="1" friction="5 0.5 0.5" condim="4" solimp="0.99 0.9999 0.0001 0.5 2"/>
+
+    <body name="base" pos="0 0 0.285125">
+      <freejoint name="root"/>
+      <geom name="base" type="mesh" mesh="hexbody" material="base" density="2770"/>
+      <geom name="head" type="box" pos="0.1125 0 0.0125" size="0.02 0.03 0.02" material="head"/>
+
+      <!-- 6 legs, one per corner. Index -> corner:
+             0 = FL (30)   1 = ML (90)   2 = BL (150)
+             3 = BR (210)  4 = MR (270)  5 = FR (330) -->
+      <body name="leg0_seg0" pos="0.129904 0.075 0" euler="0 0 30" childclass="hexapod">
+        <joint name="leg0_seg0" class="seg0"/>
+        <geom class="seg0" fromto="0 0 0 0.025 0 0"/>
+        <body name="leg0_seg1" pos="0.025 0 0">
+          <joint name="leg0_seg1" class="seg1"/>
+          <geom class="seg1" fromto="0 0 0 0.025 0 0"/>
+          <body name="leg0_seg2" pos="0.025 0 0">
+            <joint name="leg0_seg2" class="seg2"/>
+            <geom class="seg2" fromto="0 0 0 0.2 0 0"/>
+            <body name="leg0_seg3" pos="0.2 0 0">
+              <joint name="leg0_seg3" class="seg3"/>
+              <geom class="seg3" fromto="0 0 0 0.25 0 0"/>
+              <body name="foot0" pos="0.25 0 0">
+                <geom name="foot0" type="sphere" size="0.025" density="1810" material="foot" condim="4" solimp="0.99 0.9999 0.0001 0.5 2" margin="0.01" gap="0.01" friction="5 0.5 0.5"/>
+                <site name="foot0" size="0.012"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="leg1_seg0" pos="9.18485e-18 0.15 0" euler="0 0 90" childclass="hexapod">
+        <joint name="leg1_seg0" class="seg0"/>
+        <geom class="seg0" fromto="0 0 0 0.025 0 0"/>
+        <body name="leg1_seg1" pos="0.025 0 0">
+          <joint name="leg1_seg1" class="seg1"/>
+          <geom class="seg1" fromto="0 0 0 0.025 0 0"/>
+          <body name="leg1_seg2" pos="0.025 0 0">
+            <joint name="leg1_seg2" class="seg2"/>
+            <geom class="seg2" fromto="0 0 0 0.2 0 0"/>
+            <body name="leg1_seg3" pos="0.2 0 0">
+              <joint name="leg1_seg3" class="seg3"/>
+              <geom class="seg3" fromto="0 0 0 0.25 0 0"/>
+              <body name="foot1" pos="0.25 0 0">
+                <geom name="foot1" type="sphere" size="0.025" density="1810" material="foot" condim="4" solimp="0.99 0.9999 0.0001 0.5 2" margin="0.01" gap="0.01" friction="5 0.5 0.5"/>
+                <site name="foot1" size="0.012"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="leg2_seg0" pos="-0.129904 0.075 0" euler="0 0 150" childclass="hexapod">
+        <joint name="leg2_seg0" class="seg0"/>
+        <geom class="seg0" fromto="0 0 0 0.025 0 0"/>
+        <body name="leg2_seg1" pos="0.025 0 0">
+          <joint name="leg2_seg1" class="seg1"/>
+          <geom class="seg1" fromto="0 0 0 0.025 0 0"/>
+          <body name="leg2_seg2" pos="0.025 0 0">
+            <joint name="leg2_seg2" class="seg2"/>
+            <geom class="seg2" fromto="0 0 0 0.2 0 0"/>
+            <body name="leg2_seg3" pos="0.2 0 0">
+              <joint name="leg2_seg3" class="seg3"/>
+              <geom class="seg3" fromto="0 0 0 0.25 0 0"/>
+              <body name="foot2" pos="0.25 0 0">
+                <geom name="foot2" type="sphere" size="0.025" density="1810" material="foot" condim="4" solimp="0.99 0.9999 0.0001 0.5 2" margin="0.01" gap="0.01" friction="5 0.5 0.5"/>
+                <site name="foot2" size="0.012"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="leg3_seg0" pos="-0.129904 -0.075 0" euler="0 0 210" childclass="hexapod">
+        <joint name="leg3_seg0" class="seg0"/>
+        <geom class="seg0" fromto="0 0 0 0.025 0 0"/>
+        <body name="leg3_seg1" pos="0.025 0 0">
+          <joint name="leg3_seg1" class="seg1"/>
+          <geom class="seg1" fromto="0 0 0 0.025 0 0"/>
+          <body name="leg3_seg2" pos="0.025 0 0">
+            <joint name="leg3_seg2" class="seg2"/>
+            <geom class="seg2" fromto="0 0 0 0.2 0 0"/>
+            <body name="leg3_seg3" pos="0.2 0 0">
+              <joint name="leg3_seg3" class="seg3"/>
+              <geom class="seg3" fromto="0 0 0 0.25 0 0"/>
+              <body name="foot3" pos="0.25 0 0">
+                <geom name="foot3" type="sphere" size="0.025" density="1810" material="foot" condim="4" solimp="0.99 0.9999 0.0001 0.5 2" margin="0.01" gap="0.01" friction="5 0.5 0.5"/>
+                <site name="foot3" size="0.012"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="leg4_seg0" pos="-2.75546e-17 -0.15 0" euler="0 0 270" childclass="hexapod">
+        <joint name="leg4_seg0" class="seg0"/>
+        <geom class="seg0" fromto="0 0 0 0.025 0 0"/>
+        <body name="leg4_seg1" pos="0.025 0 0">
+          <joint name="leg4_seg1" class="seg1"/>
+          <geom class="seg1" fromto="0 0 0 0.025 0 0"/>
+          <body name="leg4_seg2" pos="0.025 0 0">
+            <joint name="leg4_seg2" class="seg2"/>
+            <geom class="seg2" fromto="0 0 0 0.2 0 0"/>
+            <body name="leg4_seg3" pos="0.2 0 0">
+              <joint name="leg4_seg3" class="seg3"/>
+              <geom class="seg3" fromto="0 0 0 0.25 0 0"/>
+              <body name="foot4" pos="0.25 0 0">
+                <geom name="foot4" type="sphere" size="0.025" density="1810" material="foot" condim="4" solimp="0.99 0.9999 0.0001 0.5 2" margin="0.01" gap="0.01" friction="5 0.5 0.5"/>
+                <site name="foot4" size="0.012"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="leg5_seg0" pos="0.129904 -0.075 0" euler="0 0 330" childclass="hexapod">
+        <joint name="leg5_seg0" class="seg0"/>
+        <geom class="seg0" fromto="0 0 0 0.025 0 0"/>
+        <body name="leg5_seg1" pos="0.025 0 0">
+          <joint name="leg5_seg1" class="seg1"/>
+          <geom class="seg1" fromto="0 0 0 0.025 0 0"/>
+          <body name="leg5_seg2" pos="0.025 0 0">
+            <joint name="leg5_seg2" class="seg2"/>
+            <geom class="seg2" fromto="0 0 0 0.2 0 0"/>
+            <body name="leg5_seg3" pos="0.2 0 0">
+              <joint name="leg5_seg3" class="seg3"/>
+              <geom class="seg3" fromto="0 0 0 0.25 0 0"/>
+              <body name="foot5" pos="0.25 0 0">
+                <geom name="foot5" type="sphere" size="0.025" density="1810" material="foot" condim="4" solimp="0.99 0.9999 0.0001 0.5 2" margin="0.01" gap="0.01" friction="5 0.5 0.5"/>
+                <site name="foot5" size="0.012"/>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <actuator>
+    <position name="leg0_seg0" joint="leg0_seg0" class="hexapod"/>
+    <position name="leg0_seg1" joint="leg0_seg1" class="hexapod"/>
+    <position name="leg0_seg2" joint="leg0_seg2" class="hexapod"/>
+    <position name="leg0_seg3" joint="leg0_seg3" class="hexapod"/>
+    <position name="leg1_seg0" joint="leg1_seg0" class="hexapod"/>
+    <position name="leg1_seg1" joint="leg1_seg1" class="hexapod"/>
+    <position name="leg1_seg2" joint="leg1_seg2" class="hexapod"/>
+    <position name="leg1_seg3" joint="leg1_seg3" class="hexapod"/>
+    <position name="leg2_seg0" joint="leg2_seg0" class="hexapod"/>
+    <position name="leg2_seg1" joint="leg2_seg1" class="hexapod"/>
+    <position name="leg2_seg2" joint="leg2_seg2" class="hexapod"/>
+    <position name="leg2_seg3" joint="leg2_seg3" class="hexapod"/>
+    <position name="leg3_seg0" joint="leg3_seg0" class="hexapod"/>
+    <position name="leg3_seg1" joint="leg3_seg1" class="hexapod"/>
+    <position name="leg3_seg2" joint="leg3_seg2" class="hexapod"/>
+    <position name="leg3_seg3" joint="leg3_seg3" class="hexapod"/>
+    <position name="leg4_seg0" joint="leg4_seg0" class="hexapod"/>
+    <position name="leg4_seg1" joint="leg4_seg1" class="hexapod"/>
+    <position name="leg4_seg2" joint="leg4_seg2" class="hexapod"/>
+    <position name="leg4_seg3" joint="leg4_seg3" class="hexapod"/>
+    <position name="leg5_seg0" joint="leg5_seg0" class="hexapod"/>
+    <position name="leg5_seg1" joint="leg5_seg1" class="hexapod"/>
+    <position name="leg5_seg2" joint="leg5_seg2" class="hexapod"/>
+    <position name="leg5_seg3" joint="leg5_seg3" class="hexapod"/>
+  </actuator>
+
+  <keyframe>
+    <key name="home" qpos="0 0 0.285125 1 0 0 0  0 0 0.0523599 1.46608  0 0 0.0523599 1.46608  0 0 0.0523599 1.46608  0 0 0.0523599 1.46608  0 0 0.0523599 1.46608  0 0 0.0523599 1.46608"/>
+  </keyframe>
+  <equality>
+    <weld name="wf0" body1="foot0" torquescale="0" active="false"/>
+    <weld name="wf1" body1="foot1" torquescale="0" active="false"/>
+    <weld name="wf2" body1="foot2" torquescale="0" active="false"/>
+    <weld name="wf3" body1="foot3" torquescale="0" active="false"/>
+    <weld name="wf4" body1="foot4" torquescale="0" active="false"/>
+    <weld name="wf5" body1="foot5" torquescale="0" active="false"/>
+  </equality>
+</mujoco>

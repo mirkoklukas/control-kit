@@ -17,6 +17,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 from jaxlie import SE3, SO3
+from jax.scipy.spatial.transform import Rotation as Rot
 
 
 # Let a batched SE3 be indexed/sliced like an array (jaxlie doesn't support it).
@@ -43,9 +44,11 @@ SE3.broadcast_to = _se3_broadcast_to
 #   Intrinsic = XYZ (uppercase, moving axes) ; Extrinsic = xyz (lowercase, fixed).
 # jaxlie's SO3.from_rpy_radians(r, p, y) == Rz(y) @ Ry(p) @ Rx(r) (ZYX), and is
 # exactly scipy's from_euler("xyz", [r, p, y]) / from_euler("ZYX", [y, p, r]).
-def from_te(t, e) -> SE3:
+def from_te(t, e, seq="xyz") -> SE3:
     """Create an SE3 from a translation ``t`` and Euler angles ``e`` (rpy=xyz)."""
-    return SE3.from_rotation_and_translation(SO3.from_rpy_radians(*e), t)
+    rpy = Rot.from_euler(seq, e, degrees=False).as_euler("xyz", degrees=False)
+    return SE3.from_rotation_and_translation(SO3.from_rpy_radians(*rpy), t)
+SE3.from_te = staticmethod(from_te)
 
 
 
@@ -56,8 +59,8 @@ ALL_PLANTED = jnp.arange(6)  # all legs, for indexing convenience
 
 # Joint limits [coxa, femur, tibia], radians, from weld0.xml (<default> classes).
 JOINT_RANGES = jnp.deg2rad(jnp.array([
-    [-65.0,  65.0],    # coxa   (yaw)
-    [-80.0,  75.0],    # femur  (lift - pitch
+    [-100.0,  100.0],    # coxa   (yaw)
+    [-80.0,  120.0],    # femur  (lift - pitch
     [  0.0, 155.0],    # tibia  (knee - pitch
 ]))
 
@@ -75,9 +78,6 @@ SHOULDERS = SE3.from_rotation_and_translation(
 
 
 FEET_LIFTED = SHOULDERS.apply(jnp.array([LENGTHS[0]+0.2, 0.0, LENGTHS[1]-LENGTHS[2]]))
-
-
-
 
 
 
@@ -126,6 +126,12 @@ def infer_joint_xpos(body: SE3, thetas: jax.Array) -> jax.Array:
 
     return jax.vmap(_infer_joint_xpos)(shoulders, thetas)  # (6, 4, 3)
 
+def foot_in_coxa_frame(theta: jax.Array) -> jax.Array:
+    """Return the foot positions in the coxa frame for each leg."""
+    femur = from_te(jnp.array([LENGTHS[0], 0.0, 0.0]), jnp.array([0., theta[1], 0.]))
+    tibia = from_te(jnp.array([LENGTHS[1], 0.0, 0.0]), jnp.array([0., theta[2], 0.]))
+    foot = from_te(jnp.array([LENGTHS[2], 0.0, 0.0]), jnp.zeros(3))
+    return (femur @ tibia @ foot).translation()
 
 def infer_foot_vectors(body: SE3, thetas: jax.Array) -> jax.Array:
     """Return the world vectors foot to knee"""
