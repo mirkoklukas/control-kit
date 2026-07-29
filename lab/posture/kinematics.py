@@ -131,32 +131,32 @@ class Posture:
 def _joint(x, theta, axis=AXES):
     return SE3.from_te(jnp.array([x, 0.0, 0.0]), theta, axis)
 
-def _joint_frames(thetas, lengths=LENGTHS, axes=AXES):
+def _joint_frames(theta, lengths=LENGTHS, axes=AXES):
     """Maps joint angles to the frames of the joints and the end-effector
     in the world frame. Assuming shoulder link is mounted at the origin of the world frame"""
     num_joints = len(lengths)
 
-    tf = _joint(0.0, thetas[0], axes[0])
+    tf = _joint(0.0, theta[0], axes[0])
     frames = [tf]
 
-    for i in jnp.arange(num_joints-1):
-        tf = tf @ _joint(lengths[i], thetas[i+1], axes[i+1])
+    for i in range(num_joints-1):
+        tf = tf @ _joint(lengths[i], theta[i+1], axes[i+1])
         frames.append(tf)
     tf = tf @ SE3.from_translation(jnp.array([lengths[-1], 0.0, 0.0]))
     frames.append(tf)
     
     return SE3.stack(frames)
 
-def _forward_model(thetas, lengths=LENGTHS, axes=AXES):
+def _forward_model(theta, lengths=LENGTHS, axes=AXES):
     """Maps joint angles to the positions of the joints and the end-effector
     in the world frame. Assuming shoulder link is mounted at the origin of the world frame"""
     num_joints = len(lengths)
 
-    tf = _joint(0.0, thetas[0], axes[0])
+    tf = _joint(0.0, theta[0], axes[0])
     xpos = [tf.translation()]
 
-    for i in jnp.arange(num_joints-1):
-        tf = tf @ _joint(lengths[i], thetas[i+1], axes[i+1])
+    for i in range(num_joints-1):
+        tf = tf @ _joint(lengths[i], theta[i+1], axes[i+1])
         xpos.append(tf.translation())
     tf = tf @ SE3.from_translation(jnp.array([lengths[-1], 0.0, 0.0]))
     xpos.append(tf.translation())
@@ -166,70 +166,7 @@ def _forward_model(thetas, lengths=LENGTHS, axes=AXES):
 #
 #   Inverse kinematics;
 #
-def _infer_theta_OLD(shoulder: SE3, foot: jax.Array, normal: jax.Array, lengths: jax.Array=LENGTHS) -> tuple[jax.Array, jax.Array]:
-    """Compute joint angles that place the foot at ``foot``."""
-
-    # Move the inputs to the shoulder frame.
-    p = shoulder.inverse().apply(foot)
-    # n = shoulder.rotation().inverse().apply(normal)          
-
-    # HIP-YAW:
-    # We pick the angle of the coxa joint to be in the range [-pi/2, pi/2]; 
-    # This is enforcing a joint limit within [-pi/2, pi/2]. That is a modeling assumption to 
-    # avoid the second theta_0 branch
-    yaw = jnp.arctan2(p[1], p[0])
-    yaw = jnp.where(p[0] < 0, yaw + jnp.pi, yaw)
-    yaw = adjust_angle(yaw)
-
-    # HIP-ROLL:
-    # Choose roll such that the surface normal is in the flexion plane of the leg. 
-    # Technically we have 1-parameter family of (yaw,roll) pairs.
-    #
-    # hip = _joint(0.0, yaw, "z")
-    # n = hip.rotation().inverse().apply(n)
-    # this should align the z-axis with the projected normal
-    hip = _joint(0.0, yaw, "z") @ SE3.from_translation(jnp.array([lengths[0], 0.0, 0.0])) 
-    v = hip.inverse().apply(p)
-    roll = jnp.arctan2(v[2], v[1]) - jnp.pi/2 
-
-    # HIP-PITCH and KNEE-PITCH:
-    # We should now have a 2D problem in the plane of the leg. 
-    # We can use the law of cosines to compute the angles.
-    hip = ( 
-        _joint(0.0, yaw, "z") @ 
-        _joint(lengths[0], roll, "x") @ 
-        SE3.from_translation(jnp.array([lengths[1], 0.0, 0.0])) 
-    )
-    u0, u1 = hip.inverse().apply(p)[jnp.array([0, 2])]
-    
-    # a=foot, b=femur, c=tibia
-    a = jnp.sqrt(u0**2 + u1**2)
-    b = lengths[2]
-    c = lengths[3]
-
-    reachable = (
-        (a <= (b + c)) &
-        (a >= jnp.abs(b - c))
-    )
-
-    offset = jnp.arctan2(u1, u0)
-    alpha = jnp.arccos(
-        (c**2 + b**2 - a**2 ) / (2 * c * b)
-    )
-    gamma = jnp.arccos(
-        (b**2 + a**2 - c**2 ) / (2 * b * a)
-    )
-
-    # This orders the remaining branch by elbow down first. 
-    theta = jnp.array([
-        [yaw, roll,  -(offset + gamma), -(-jnp.pi + alpha)],
-        [yaw, roll, -(offset - gamma),  -jnp.pi + alpha],
-    ])
-
-    return reachable, theta[0, :]
-
-
-def _infer_theta(shoulder: SE3, foot: jax.Array, normal: jax.Array, lengths: jax.Array=LENGTHS) -> tuple[jax.Array, jax.Array]:
+def _inverse_model(foot: jax.Array, normal: jax.Array, lengths: jax.Array=LENGTHS) -> tuple[jax.Array, jax.Array]:
     """Like :func:`_infer_theta`, but yaw and roll are solved *jointly*.
 
     The leg's flexion plane (the x-z plane of the frame after yaw@roll) must contain
@@ -243,8 +180,8 @@ def _infer_theta(shoulder: SE3, foot: jax.Array, normal: jax.Array, lengths: jax
     were picked independently, leaving the foot off the tilted plane by its
     out-of-plane component and mislocating it for non-vertical normals.
     """
-    p = shoulder.inverse().apply(foot)
-    n = shoulder.rotation().inverse().apply(normal)
+    p = foot
+    n = normal
 
     # Flexion-plane out-of-plane axis: perpendicular to both the foot and the normal.
     yhat = jnp.cross(p, n)
@@ -289,6 +226,11 @@ def _infer_theta(shoulder: SE3, foot: jax.Array, normal: jax.Array, lengths: jax
 
     return reachable, theta[0, :]
 
+
+def _infer_theta(shoulder: SE3, foot: jax.Array, normal: jax.Array, lengths: jax.Array=LENGTHS) -> tuple[jax.Array, jax.Array]:
+    p = shoulder.inverse().apply(foot)
+    n = shoulder.rotation().inverse().apply(normal)
+    return _inverse_model(p, n, lengths)
 
 def infer_theta(body, feet, normals, lengths=LENGTHS, shoulders=SHOULDERS) -> tuple[jax.Array, jax.Array]:
     reachable, theta = jax.vmap(_infer_theta, in_axes=(0, 0, 0, None))(

@@ -22,3 +22,6 @@ scratch/
 
 # Derived terrain sampling pool (rebuilt from the model by mjx_terrain.load_pool).
 *_pool.npz
+
+# MuJoCo writes this runtime log into the cwd.
+MUJOCO_LOG.TXT

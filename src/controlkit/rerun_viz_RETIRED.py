@@ -24,7 +24,15 @@ import jax.numpy as jnp
 import rerun as rr
 from jaxlie import SE3, SO3
 
-from .kinematics import _joint_frames, SHOULDERS, LENGTHS, AXES
+from controlkit.kinematics import chain, leg4dof
+from controlkit.kinematics.robots import QUAD_4DOF
+
+# TODO: these helpers are pinned to one robot. They should take a RobotSpec, which
+# would also let `log_posture` draw a hexapod without swapping this constant.
+_ROBOT = QUAD_4DOF
+SHOULDERS = _ROBOT.mounts
+LENGTHS = _ROBOT.leg.lengths
+AXES = leg4dof.AXES
 
 BODY_COLOR = (66, 135, 245)
 SEGMENT_COLOR = (90, 90, 90)
@@ -346,6 +354,59 @@ def log_hex(path, body: SE3, *, color=BODY_COLOR, radius=0.15, thickness=0.05,
     log_mesh(f"{path}/hex/body", verts, faces, color=color, normals=normals, edge_color=edge_color)
 
 
+def log_leg4d(path, shoulder: SE3, theta, lengths=LENGTHS, axes=AXES, *,
+              foot_radius=0.02, foot_color=SEGMENT_COLOR, disk_colors=None,
+              joint_values=None, joint_cmap="viridis", joint_min=None, joint_max=None,
+              **joint_kw):
+    """Draw one leg (joints + links + foot) at world-frame shoulder pose ``shoulder``.
+
+    The joint chain is built by :func:`..kinematics.chain.joint_frames` in the leg's
+    local frame and lifted to the world by ``shoulder``. Each joint is drawn with
+    :func:`log_joint` (a disk flattened along the joint axis + a link box of the
+    corresponding length along the leg's local x); the foot is a small sphere at
+    the end-effector frame. Generic in the number of joints (``len(axes)``); the
+    ``4d`` name reflects the default 4-DOF hexapod leg.
+
+    Args:
+        path: rerun entity path (joint ``k`` at ``{path}/j{k}``, foot at
+            ``{path}/foot``).
+        shoulder: SE3 world pose of the shoulder (leg-base) frame.
+        theta: (NUM_JOINTS,) joint angles (radians).
+        lengths: (NUM_JOINTS,) link lengths (m); the last is the foot segment.
+        axes: per-joint rotation axes ("x"/"y"/"z"), in chain order.
+        foot_radius: foot-sphere radius (m).
+        foot_color: RGB(A) color of the foot sphere.
+        disk_colors: optional explicit (NUM_JOINTS, 3/4) per-joint disk colors;
+            takes precedence over ``joint_values``. None uses the ``log_joint``
+            default (or ``joint_values`` if given).
+        joint_values: optional (NUM_JOINTS,) per-joint scalars mapped through
+            ``joint_cmap`` to color the discs (e.g. torque); ignored if
+            ``disk_colors`` is given.
+        joint_cmap: matplotlib colormap for ``joint_values``.
+        joint_min: lower color bound for ``joint_values`` (default data min).
+        joint_max: upper color bound for ``joint_values`` (default data max).
+        **joint_kw: forwarded to :func:`log_joint` (``disk_radius``, ``link_width``,
+            ``link_color``, ...); ``disk_color`` is overridden when ``disk_colors``
+            or ``joint_values`` is given.
+
+    Returns:
+        frames: (NUM_JOINTS+1,) SE3 world frames (joints then end-effector).
+    """
+    frames = shoulder @ chain.joint_frames(theta, lengths, axes)  # (NUM_JOINTS+1,) world frames
+    njoint = len(axes)
+    if disk_colors is None and joint_values is not None:          # scalars -> per-joint colors
+        disk_colors = colors_from_values(joint_values, cmap=joint_cmap,
+                                         vmin=joint_min, vmax=joint_max)
+    for k in range(njoint):                                       # disk + link per joint
+        jk = dict(joint_kw)
+        if disk_colors is not None:
+            jk["disk_color"] = disk_colors[k]
+        log_joint(f"{path}/j{k}", frames[k], axes[k], ("x", float(lengths[k])), **jk)
+    foot = np.asarray(frames[njoint].translation())              # end-effector = foot
+    log_spheres(f"{path}/foot", foot[None], foot_radius, colors=foot_color)
+    return frames
+
+
 def log_posture(path, posture, *, hide_free=False, frc=None, mom=None, tau=None,
                 tmin=None, tmax=None, cmap="bwr",
                 body_size=(0.2, 0.15, 0.025), body_color=BODY_COLOR,
@@ -356,7 +417,7 @@ def log_posture(path, posture, *, hide_free=False, frc=None, mom=None, tau=None,
     """Draw a full posture: a flat-cube body plus each leg's joints and links,
     optionally colored by joint torque and with a reaction force arrow per foot.
 
-    Per-leg joint frames come from :func:`..kinematics._joint_frames` (pure jax),
+    Per-leg joint frames come from :func:`..kinematics.chain.joint_frames` (pure jax),
     lifted to the world by ``body @ SHOULDERS[leg]``. Each joint is drawn with
     :func:`log_joint` (a disk flattened along the joint axis + a link box along the
     leg's local x); the foot is a small sphere at the end-effector frame.
@@ -416,7 +477,7 @@ def log_posture(path, posture, *, hide_free=False, frc=None, mom=None, tau=None,
     for i in range(nleg):
         if not shown[i]:                                         # hidden free leg
             continue
-        frames = shoulders[i] @ _joint_frames(thetas[i])         # (NUM_JOINTS+1,) world frames
+        frames = shoulders[i] @ chain.joint_frames(thetas[i], LENGTHS, AXES)  # world frames
         for k in range(njoint):                                  # disk + link per joint
             jk = dict(joint_kw)
             if tau is not None:

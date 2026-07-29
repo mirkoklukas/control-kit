@@ -31,7 +31,17 @@ import jax.numpy as jnp
 import mujoco
 from mujoco import mjx
 
-from .kinematics import Posture, NUM_LEGS as LEGS, NUM_JOINTS as JOINTS
+# The model-agnostic statics core now lives in the library; this module keeps the
+# lab-local glue (its own Posture/Stance, the 6x4DOF model, self-collision) on top.
+from controlkit.forces import (
+    stance_forces, stance_wrenches, stance_sensitivity,
+    stance_forces_batch, stance_wrenches_batch, stance_sensitivity_batch,
+    stance_sigma_min,
+)
+
+from .kinematics import (
+    Posture, RADIUS, SHOULDERS, _forward_model, NUM_LEGS as LEGS,
+)
 
 MODEL = Path(__file__).resolve().parent / "6x4DOF.xml"
 
@@ -72,37 +82,6 @@ def to_qpos(posture: Posture):
     return jnp.concatenate([free, jnp.asarray(posture.thetas).reshape(-1)])
 
 
-def stance_forces(mjx_model, foot_ids, qpos, support):
-    """Static foot reaction forces + joint hold torques for one planted posture.
-
-    Args:
-        mjx_model: the ``put_model``'d model.
-        foot_ids: (nf,) foot body ids.
-        qpos: (nq,) configuration.
-        support: (nf,) bool -- True = that leg's foot is planted (bears load).
-
-    Returns:
-        foot_forces: (nf, 3) world-frame reaction force per foot; 0 for unplanted
-            legs. A negative z means the stance would tip (the foot would lift).
-        joint_torques: (nf, nj) actuator torque per leg (nj = joints per leg)
-            needed to hold the pose under those foot reactions.
-    """
-    nv = mjx_model.nv
-    d = mjx.forward(mjx_model, mjx.make_data(mjx_model).replace(
-        qpos=qpos, qvel=jnp.zeros(nv)))
-    g = d.qfrc_bias                                            # (nv,) gravity gen. force
-    Jp = jax.vmap(lambda fid: mjx.jac(mjx_model, d, d.xpos[fid], fid)[0])(foot_ids)  # (LEGS,nv,3)
-    w = support.astype(g.dtype)
-
-    # base (free-joint) rows: sum_i w_i Jp[i,:6,:] @ f_i = g[:6]  ->  solve foot forces
-    M = jnp.transpose(Jp[:, :6, :] * w[:, None, None], (1, 0, 2)).reshape(6, 3 * LEGS)
-    f = jnp.linalg.lstsq(M, g[:6])[0].reshape(LEGS, 3) * w[:, None]      # (LEGS, 3)
-
-    # joint rows: tau = g_joint - sum_i Jp[i,6:,:] @ f_i
-    tau = g[6:] - jnp.einsum("inj,ij->n", Jp[:, 6:, :], f)              # (nv-6,)
-    return f, tau.reshape(LEGS, JOINTS)
-
-
 def posture_forces(mjx_model, foot_ids, posture: Posture):
     """:func:`stance_forces` for a :class:`..kinematics.Posture`.
 
@@ -119,45 +98,6 @@ def posture_forces(mjx_model, foot_ids, posture: Posture):
             legs); joint_torques: (LEGS, JOINTS) actuator torque per leg.
     """
     return stance_forces(mjx_model, foot_ids, to_qpos(posture), posture.stance.support)
-
-
-def stance_wrenches(mjx_model, foot_ids, qpos, support):
-    """Static 6-DOF version of :func:`stance_forces`: each planted foot may exert a
-    full **wrench** (force + moment), as with a ``torquescale>0`` weld / a rigid
-    grip that resists the foot twisting.
-
-    Same statics as ``stance_forces`` but each foot contributes ``Jp^T f + Jr^T m``
-    (translational Jacobian times force, plus rotational Jacobian times moment), so
-    the per-foot unknown is a 6-vector ``[f, m]``. Solving the base rows now
-    distributes the load into moments too (even more underdetermined -> min-norm).
-
-    Args:
-        mjx_model: the ``put_model``'d model.
-        foot_ids: (nf,) foot body ids.
-        qpos: (nq,) configuration.
-        support: (nf,) bool -- True = that leg's foot is planted (grips).
-
-    Returns:
-        foot_forces: (nf, 3) world-frame reaction force per foot.
-        foot_moments: (nf, 3) world-frame reaction moment per foot.
-        joint_torques: (nf, nj) actuator torque per leg.
-    """
-    nv = mjx_model.nv
-    d = mjx.forward(mjx_model, mjx.make_data(mjx_model).replace(
-        qpos=qpos, qvel=jnp.zeros(nv)))
-    g = d.qfrc_bias
-    # per foot: [Jp | Jr] -> (nv, 6); columns 0:3 map force, 3:6 map moment.
-    Jw = jax.vmap(lambda fid: jnp.concatenate(
-        mjx.jac(mjx_model, d, d.xpos[fid], fid), axis=-1))(foot_ids)    # (LEGS, nv, 6)
-    w = support.astype(g.dtype)
-
-    # base rows: sum_i w_i Jw[i,:6,:] @ x_i = g[:6],  x_i = [f_i(3), m_i(3)]
-    M = jnp.transpose(Jw[:, :6, :] * w[:, None, None], (1, 0, 2)).reshape(6, 6 * LEGS)
-    x = jnp.linalg.lstsq(M, g[:6])[0].reshape(LEGS, 6) * w[:, None]     # (LEGS, 6)
-
-    # joint rows: tau = g_joint - sum_i Jw[i,6:,:] @ x_i
-    tau = g[6:] - jnp.einsum("inj,ij->n", Jw[:, 6:, :], x)
-    return x[:, :3], x[:, 3:], tau.reshape(LEGS, JOINTS)
 
 
 def posture_wrenches(mjx_model, foot_ids, posture: Posture):
@@ -177,86 +117,134 @@ def posture_wrenches(mjx_model, foot_ids, posture: Posture):
     return stance_wrenches(mjx_model, foot_ids, to_qpos(posture), posture.stance.support)
 
 
-def stance_sensitivity(mjx_model, foot_ids, qpos, support):
-    """Static stance forces plus their sensitivity to a wrench applied to the body.
-
-    Same base-equilibrium solve as :func:`stance_forces`, but through the
-    pseudoinverse ``M+`` of ``M = J_base^T`` (the base-dof rows of the planted
-    feet's Jacobians). ``M+`` gives the nominal forces (``f = M+ g_base``) *and* the
-    linearized response to an external body wrench ``w`` -- a stance-stability map:
-    applying ``w`` perturbs the base balance by ``-w``, so ``df = -M+ w`` and
-    ``dtau = -sum_i J_joint_i @ df_i``. Small ``|dfdw|`` / staying admissible under
-    the wrenches you expect => a robust stance.
-
-    Args:
-        mjx_model: the ``put_model``'d model.
-        foot_ids: (nf,) foot body ids.
-        qpos: (nq,) configuration.
-        support: (nf,) bool planted mask.
-
-    Returns:
-        foot_forces: (nf, 3) nominal reaction force per foot (matches stance_forces).
-        joint_torques: (nf, nj) nominal actuator torque per leg.
-        dfdw: (nf, 3, 6) d(foot force) / d(body wrench). The wrench is
-            ``[Fx, Fy, Fz, Tx, Ty, Tz]`` on the base dofs (force in world frame,
-            torque in the base frame).
-        dtaudw: (nf, nj, 6) d(joint torque) / d(body wrench).
-    """
-    nv = mjx_model.nv
-    d = mjx.forward(mjx_model, mjx.make_data(mjx_model).replace(
-        qpos=qpos, qvel=jnp.zeros(nv)))
-    g = d.qfrc_bias
-    Jp = jax.vmap(lambda fid: mjx.jac(mjx_model, d, d.xpos[fid], fid)[0])(foot_ids)  # (LEGS,nv,3)
-    w = support.astype(g.dtype)
-
-    M = jnp.transpose(Jp[:, :6, :] * w[:, None, None], (1, 0, 2)).reshape(6, 3 * LEGS)
-    Mpinv = jnp.linalg.pinv(M)                                 # (3*LEGS, 6); zero rows for lifted feet
-    f = (Mpinv @ g[:6]).reshape(LEGS, 3)                       # nominal foot forces (= lstsq)
-    dfdw = -Mpinv.reshape(LEGS, 3, 6)                          # d(foot force) / d(body wrench)
-
-    Jj = Jp[:, 6:, :]                                          # (LEGS, nv-6, 3)
-    tau = g[6:] - jnp.einsum("inj,ij->n", Jj, f)
-    dtaudw = -jnp.einsum("inj,ijk->nk", Jj, dfdw)             # (nv-6, 6)
-    return f, tau.reshape(LEGS, JOINTS), dfdw, dtaudw.reshape(LEGS, JOINTS, 6)
+def posture_sigma_min(mjx_model, foot_ids, posture: Posture, *, length=RADIUS):
+    """:func:`stance_sigma_min` for a :class:`..kinematics.Posture`."""
+    return stance_sigma_min(mjx_model, foot_ids, to_qpos(posture),
+                            posture.stance.support, length=length)
 
 
-def stance_forces_batch(mjx_model, foot_ids, qpos, supports):
-    """Vectorized :func:`stance_forces` over N postures.
+# hexbody AABB half-extents in the body frame: hexagon circumradius RADIUS
+# (corners at 30/90/... deg -> x = R cos30, y = R), prism thickness 0.05.
+BODY_HALF = (RADIUS * 0.8660254, RADIUS, 0.025)
+
+
+def _seg_aabb_hit(a, b, half):
+    """Do segments ``a->b`` intersect the origin-centred AABB of half-extents ``half``?
+
+    Slab test clipped to the segment, requiring a *positive-length* overlap (so a
+    segment merely touching a face -- e.g. at a leg root -- does not count).
 
     Args:
-        mjx_model: the ``put_model``'d model.
-        foot_ids: (nf,) foot body ids.
-        qpos: (N, nq) configurations.
-        supports: (N, nf) bool planted masks.
+        a, b: (..., 3) segment endpoints (body frame).
+        half: (3,) box half-extents.
 
     Returns:
-        foot_forces: (N, nf, 3), joint_torques: (N, nf, nj).
+        (...,) bool -- True where the open segment interior meets the box interior.
     """
-    return jax.vmap(lambda q, s: stance_forces(mjx_model, foot_ids, q, s))(qpos, supports)
+    d = b - a
+    eps = 1e-9
+    safe = jnp.where(jnp.abs(d) < eps, eps, d)
+    t1 = (-half - a) / safe
+    t2 = (half - a) / safe
+    lo = jnp.minimum(t1, t2)
+    hi = jnp.maximum(t1, t2)
+    par = jnp.abs(d) < eps                                     # axis parallel to a slab
+    inside = jnp.abs(a) <= half
+    lo = jnp.where(par, jnp.where(inside, -jnp.inf, jnp.inf), lo)
+    hi = jnp.where(par, jnp.where(inside, jnp.inf, -jnp.inf), hi)
+    t_enter = jnp.maximum(jnp.max(lo, axis=-1), 0.0)
+    t_exit = jnp.minimum(jnp.min(hi, axis=-1), 1.0)
+    return t_enter < t_exit
 
 
-def stance_wrenches_batch(mjx_model, foot_ids, qpos, supports):
-    """Vectorized :func:`stance_wrenches` over N postures.
+def _leg_segments(thetas):
+    """(LEGS, 3, 2, 3) femur/tibia segments per leg, in the body frame (coxa skipped).
+
+    Joint positions from ``_forward_model`` lifted by ``SHOULDERS``; the base pose is
+    irrelevant, so it isn't used. The coxa stub (shoulder -> first joint) always
+    points radially outward, so it is dropped. Last two axes are ``[a, b]`` endpoints.
+    """
+    pts = jax.vmap(lambda sh, th: sh.apply(_forward_model(th)))(SHOULDERS, jnp.asarray(thetas))  # (LEGS,5,3)
+    return jnp.stack([pts[:, 1:-1, :], pts[:, 2:, :]], axis=-2)   # (LEGS,3,2,3)
+
+
+def _seg_seg_dist(p1, q1, p2, q2):
+    """Closest distance between segments ``p1->q1`` and ``p2->q2`` (broadcasts over
+    leading axes). Clamped closest-point solve (Ericson)."""
+    d1, d2, r = q1 - p1, q2 - p2, p1 - p2
+    a = (d1 * d1).sum(-1); e = (d2 * d2).sum(-1); f = (d2 * r).sum(-1)
+    b = (d1 * d2).sum(-1); c = (d1 * r).sum(-1)
+    eps = 1e-12
+    denom = a * e - b * b
+    s = jnp.where(denom > eps, jnp.clip((b * f - c * e) / jnp.where(denom > eps, denom, 1.0), 0.0, 1.0), 0.0)
+    t = jnp.clip((b * s + f) / jnp.where(e > eps, e, 1.0), 0.0, 1.0)
+    s = jnp.clip((t * b - c) / jnp.where(a > eps, a, 1.0), 0.0, 1.0)
+    c1 = p1 + s[..., None] * d1
+    c2 = p2 + t[..., None] * d2
+    return jnp.linalg.norm(c1 - c2, axis=-1)
+
+
+def legs_intersect_body(posture: Posture, *, box=BODY_HALF, margin=0.0):
+    """True if any leg segment penetrates the body's bounding box.
+
+    The body is an axis-aligned box in the body frame (default the hexbody AABB,
+    :data:`BODY_HALF`). The coxa stubs are skipped; the femur/tibia segments are
+    tested (see :func:`_leg_segments`).
 
     Args:
-        mjx_model: the ``put_model``'d model.
-        foot_ids: (nf,) foot body ids.
-        qpos: (N, nq) configurations.
-        supports: (N, nf) bool planted masks.
+        posture: a :class:`..kinematics.Posture` (single; only ``thetas`` are used).
+        box: (3,) body-frame AABB half-extents.
+        margin: added to ``box`` (e.g. the leg-capsule radius) for clearance.
 
     Returns:
-        foot_forces: (N, nf, 3), foot_moments: (N, nf, 3), joint_torques: (N, nf, nj).
+        scalar bool -- True if any tested segment intersects the (inflated) box.
     """
-    return jax.vmap(lambda q, s: stance_wrenches(mjx_model, foot_ids, q, s))(qpos, supports)
+    segs = _leg_segments(posture.thetas)                      # (LEGS,3,2,3)
+    return _seg_aabb_hit(segs[..., 0, :], segs[..., 1, :], jnp.asarray(box) + margin).any()
 
 
-def stance_sensitivity_batch(mjx_model, foot_ids, qpos, supports):
-    """Vectorized :func:`stance_sensitivity` over N postures.
+def self_collision(posture: Posture, *, box=BODY_HALF, margin=0.0,
+                   leg_radius=0.015, foot_radius=0.025):
+    """True if the posture self-collides.
 
-    Returns foot_forces (N,nf,3), joint_torques (N,nf,nj), dfdw (N,nf,3,6),
-    dtaudw (N,nf,nj,6).
+    Checks, on the femur/tibia segments + foot spheres (coxa stubs skipped):
+      * segment vs the body bounding box (see :func:`legs_intersect_body`);
+      * segment vs another leg's segment (centerlines within ``2 * leg_radius``);
+      * foot sphere vs the body box (center within ``box + foot_radius``);
+      * foot sphere vs another leg's foot (centers within ``2 * foot_radius``).
+    Same-leg (within-a-leg) pairs are excluded -- adjacent links share joints.
+
+    Args:
+        posture: a :class:`..kinematics.Posture` (single; only ``thetas`` are used).
+        box: (3,) body-frame AABB half-extents.
+        margin: added to ``box`` for the segment/body test.
+        leg_radius: leg-capsule radius; inter-leg collision if centerlines are within
+            ``2 * leg_radius``.
+        foot_radius: foot-sphere radius.
+
+    Returns:
+        scalar bool.
     """
-    return jax.vmap(lambda q, s: stance_sensitivity(mjx_model, foot_ids, q, s))(qpos, supports)
+    segs = _leg_segments(posture.thetas)                      # (LEGS, S, 2, 3)
+    a, b = segs[..., 0, :], segs[..., 1, :]
+    feet = b[:, -1, :]                                        # (LEGS, 3) foot = last tibia endpoint
+
+    # segment vs body box, and segment vs other legs' segments
+    body = _seg_aabb_hit(a, b, jnp.asarray(box) + margin).any()
+    S = segs.shape[1]
+    P, Q = a.reshape(LEGS * S, 3), b.reshape(LEGS * S, 3)      # segments flattened, leg-major
+    dist = _seg_seg_dist(P[:, None, :], Q[:, None, :], P[None, :, :], Q[None, :, :])  # (M, M)
+    leg = jnp.repeat(jnp.arange(LEGS), S)                      # leg id per segment
+    seg_pairs = jnp.triu(jnp.ones((LEGS * S, LEGS * S), bool), 1) & (leg[:, None] != leg[None, :])
+    inter = ((dist < 2.0 * leg_radius) & seg_pairs).any()
+
+    # foot sphere vs body box, and foot vs foot (different legs)
+    foot_body = (jnp.abs(feet) <= (jnp.asarray(box) + foot_radius)).all(-1).any()
+    D = jnp.linalg.norm(feet[:, None, :] - feet[None, :, :], axis=-1)   # (LEGS, LEGS)
+    foot_foot = ((D < 2.0 * foot_radius) & jnp.triu(jnp.ones((LEGS, LEGS), bool), 1)).any()
+    # (could also add foot-vs-other-leg-segment: _seg_seg_dist(feet, P, Q) < foot_radius + leg_radius)
+
+    return body | inter | foot_body | foot_foot
 
 
 if __name__ == "__main__":

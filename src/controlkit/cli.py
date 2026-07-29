@@ -11,6 +11,7 @@ from typing import Optional
 import typer
 
 from controlkit.modelgen import app as modelgen_app
+from controlkit.mujoco_viz import app as posture_app
 from controlkit.viz import app as viz_app
 from controlkit.viz import play as _play
 
@@ -20,6 +21,7 @@ app = typer.Typer(add_completion=False, no_args_is_help=True, help="controlkit C
 app.command("play")(_play)
 app.add_typer(viz_app, name="viz")
 app.add_typer(modelgen_app, name="model-gen")
+app.add_typer(posture_app, name="posture")
 
 
 @app.command("pull")
