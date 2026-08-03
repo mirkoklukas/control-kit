@@ -1,0 +1,547 @@
+<!doctype html>
+<meta charset="utf-8">
+<title>hexapod model generator</title>
+<style>
+  :root { color-scheme: dark; }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; height: 100%; overflow: hidden;
+    font: 13px/1.4 ui-sans-serif, system-ui, sans-serif; background: #11151c; color: #d7dde6; }
+  #app { display: flex; height: 100%; }
+  #view { flex: 1; position: relative; }
+  #view canvas { display: block; }
+  #panel { width: 300px; flex: none; background: #161b24; border-left: 1px solid #232b38;
+    display: flex; flex-direction: column; }
+  #panel header { padding: 12px 14px; border-bottom: 1px solid #232b38; }
+  #panel header h1 { margin: 0; font-size: 14px; font-weight: 600; }
+  #panel header .sub { color: #7e8aa0; font-size: 11px; margin-top: 3px; }
+  #body { overflow-y: auto; flex: 1; padding: 6px 14px 20px; }
+  .grp { margin-top: 14px; }
+  .grp > .h { font-size: 11px; text-transform: uppercase; letter-spacing: .06em;
+    color: #6f7c92; margin: 0 0 6px; }
+  .ctl { margin: 7px 0; }
+  .ctl .row { display: flex; justify-content: space-between; align-items: center;
+    font-size: 11px; color: #9fb0c3; }
+  .ctl .row b { color: #d7dde6; font-weight: 600; }
+  .ctl .right { display: flex; align-items: center; gap: 6px; }
+  .ctl .mass { color: #6f7c92; }
+  .ctl input[type=range] { width: 100%; margin: 4px 0 0; accent-color: #5b9bd5; }
+  input[type=number], input.hex { background: #0f141b; border: 1px solid #2f3a4d; color: #d7dde6;
+    border-radius: 5px; padding: 2px 5px; font-size: 11px; }
+  input[type=number] { width: 60px; text-align: right; }
+  .unit { color: #6f7c92; width: 12px; display: inline-block; }
+  .dual { position: relative; height: 18px; margin-top: 6px; }
+  .dual .track, .dual .fill { position: absolute; top: 7px; height: 4px; border-radius: 2px; }
+  .dual .track { left: 0; right: 0; background: #2f3a4d; }
+  .dual .fill { background: #5b9bd5; }
+  .dual input[type=range] { position: absolute; top: 0; left: 0; width: 100%; height: 18px;
+    margin: 0; background: none; pointer-events: none; -webkit-appearance: none; appearance: none; }
+  .dual input[type=range]::-webkit-slider-thumb { -webkit-appearance: none; appearance: none;
+    pointer-events: auto; width: 14px; height: 14px; border-radius: 50%; background: #cdd6e3;
+    border: 2px solid #5b9bd5; cursor: pointer; margin-top: -5px; }
+  .dual input[type=range]::-moz-range-thumb { pointer-events: auto; width: 14px; height: 14px;
+    border-radius: 50%; background: #cdd6e3; border: 2px solid #5b9bd5; cursor: pointer; }
+  .dash { color: #6f7c92; }
+  .colors { display: flex; flex-direction: column; gap: 7px; }
+  .col { display: flex; align-items: center; gap: 8px; font-size: 12px; color: #9fb0c3; }
+  .col input[type=color] { width: 26px; height: 22px; padding: 0; border: 1px solid #2f3a4d;
+    border-radius: 5px; background: none; cursor: pointer; flex: none; }
+  .col input.hex { width: 74px; font-family: ui-monospace, monospace; }
+  .bar { padding: 10px 14px; border-top: 1px solid #232b38; display: flex; align-items: center; gap: 8px; }
+  input[type=text] { background: #0f141b; border: 1px solid #2f3a4d; color: #d7dde6;
+    border-radius: 6px; padding: 5px 8px; font-size: 12px; flex: 1; min-width: 0; }
+  button { background: #2d6cdf; border: 1px solid #3b7bf0; color: #fff;
+    border-radius: 6px; padding: 6px 12px; font-size: 12px; cursor: pointer; font-weight: 600; }
+  button:hover { background: #3b7bf0; }
+  button.ghost { background: #232c3b; border-color: #2f3a4d; color: #cdd6e3; font-weight: 400; }
+  button.ghost:hover { background: #2c3950; }
+  #status { font-size: 11px; color: #7e8aa0; padding: 0 14px 10px; min-height: 14px; white-space: pre-wrap; }
+  #status.ok { color: #6fcf8e; } #status.err { color: #ff8a8a; }
+</style>
+
+<div id="app">
+  <div id="view"></div>
+  <div id="panel">
+    <header>
+      <h1>hexapod generator</h1>
+      <div class="sub" id="info">live preview · saves YAML + MJCF</div>
+    </header>
+    <div id="body"></div>
+    <div id="status"></div>
+    <div class="bar">
+      <input id="name" type="text" value="hexapod" spellcheck="false">
+      <button class="ghost" id="load">load</button>
+      <button class="ghost" id="recenter">frame</button>
+      <button id="save">save</button>
+    </div>
+  </div>
+</div>
+
+<script type="importmap">
+{ "imports": {
+  "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+  "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+}}
+</script>
+
+<script type="module">
+import * as THREE from 'three';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
+import { ConvexGeometry } from 'three/addons/geometries/ConvexGeometry.js';
+
+const DEG = Math.PI / 180;
+const CORNERS = [30, 90, 150, 210, 270, 330];
+const HALF_THICKNESS = 0.025;   // body half-thickness (fixed)
+
+// ----- spec: mirrors generate.py default_config -----
+const spec = {
+  radius: 0.12,
+  bodyDensity: 600, legDensity: 600, footDensity: 600,
+  coxaLen: 0.06, femurLen: 0.10, tibiaLen: 0.19, thickness: 0.012, footSize: 0.018,
+  restCoxa: 0, restFemur: 25, restTibia: 55,
+  coxaMin: -45, coxaMax: 45, femurMin: -75, femurMax: 75, tibiaMin: -110, tibiaMax: 30,
+  kp: 25, kv: 2.5, force: 15,
+  frictionSlide: 2.0, frictionTorsion: 0.5, frictionRoll: 0.5,
+  bodyColor: '#d9803a', headColor: '#e69940', coxaColor: '#d93333',
+  femurColor: '#3366d9', tibiaColor: '#e6cc26', footColor: '#262633',
+};
+
+// Display-only toggles (not part of the spec/YAML). Range wedges are drawn on
+// one representative leg since joint_range is shared across all six.
+let showRanges = false;
+
+// ---------- scene (MuJoCo is Z-up) ----------
+const viewEl = document.getElementById('view');
+const renderer = new THREE.WebGLRenderer({ antialias: true });
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+viewEl.appendChild(renderer.domElement);
+
+const scene = new THREE.Scene();
+scene.background = new THREE.Color(0x11151c);
+
+const camera = new THREE.PerspectiveCamera(45, 1, 0.01, 100);
+camera.up.set(0, 0, 1);
+camera.position.set(0.7, -0.9, 0.55);
+
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.target.set(0, 0, 0.12);
+controls.enableDamping = true;
+
+scene.add(new THREE.HemisphereLight(0xbfd4ff, 0x2a2f3a, 0.9));
+const sun = new THREE.DirectionalLight(0xffffff, 1.6);
+sun.position.set(1.2, -0.8, 2.0); scene.add(sun);
+
+const grid = new THREE.GridHelper(4, 40, 0x3a4a63, 0x222b39);
+grid.rotation.x = Math.PI / 2; scene.add(grid);
+
+let robot = new THREE.Group(); scene.add(robot);
+
+function resize() {
+  const w = viewEl.clientWidth, h = viewEl.clientHeight;
+  renderer.setPixelRatio(devicePixelRatio);
+  renderer.setSize(w, h);   // updateStyle=true: set canvas CSS size so it can't overflow the panel
+  camera.aspect = w / h; camera.updateProjectionMatrix();
+}
+addEventListener('resize', resize); resize();
+(function loop() { requestAnimationFrame(loop); controls.update(); renderer.render(scene, camera); })();
+
+// ---------- helpers ----------
+function hexToRgb01(hex) {
+  const n = parseInt(hex.slice(1), 16);
+  return [(n >> 16 & 255) / 255, (n >> 8 & 255) / 255, (n & 255) / 255];
+}
+function mat(hex) {
+  const [r, g, b] = hexToRgb01(hex);
+  return new THREE.MeshStandardMaterial({ color: new THREE.Color(r, g, b), metalness: 0.1, roughness: 0.7 });
+}
+// capsule from p1->p2 (arrays), CapsuleGeometry runs along +Y.
+function capsule(p1, p2, r, material) {
+  const a = new THREE.Vector3(...p1), b = new THREE.Vector3(...p2);
+  const dir = new THREE.Vector3().subVectors(b, a), len = dir.length();
+  const m = new THREE.Mesh(new THREE.CapsuleGeometry(r, len, 8, 16), material);
+  m.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+  m.position.copy(a).addScaledVector(dir, 0.5);
+  return m;
+}
+// base-origin height so the foot sphere rests on z=0 (mirror generate.base_height).
+function baseHeight() {
+  const af = spec.restFemur * DEG, at = spec.restTibia * DEG;
+  return spec.femurLen * Math.sin(af) + spec.tibiaLen * Math.sin(af + at) + spec.footSize;
+}
+
+// Filled sector showing a joint's [aMin, aMax] sweep (degrees), radius = the
+// segment length so it traces where the segment tip can travel. Built in the xy
+// plane (sweep about +z, matching the coxa yaw joint); pass rotX = -PI/2 to lay
+// it into the xz plane for the femur/tibia lift joints (sweep about +y).
+function rangeWedge(radius, aMinDeg, aMaxDeg, colorHex, rotX) {
+  const g = new THREE.Group();
+  if (rotX) g.rotation.x = rotX;
+  const t0 = aMinDeg * DEG, len = (aMaxDeg - aMinDeg) * DEG;
+  const seg = Math.max(2, Math.round(Math.abs(aMaxDeg - aMinDeg) / 4));
+  const [r, gr, b] = hexToRgb01(colorHex);
+  const color = new THREE.Color(r, gr, b);
+
+  const fill = new THREE.Mesh(
+    new THREE.CircleGeometry(radius, seg, t0, len),
+    new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.18,
+      side: THREE.DoubleSide, depthWrite: false }));
+  g.add(fill);
+
+  // outline: center -> arc -> center, so both range bounds are clearly edged.
+  const pts = [new THREE.Vector3(0, 0, 0)];
+  for (let i = 0; i <= seg; i++) {
+    const a = t0 + len * i / seg;
+    pts.push(new THREE.Vector3(Math.cos(a) * radius, Math.sin(a) * radius, 0));
+  }
+  pts.push(new THREE.Vector3(0, 0, 0));
+  g.add(new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts),
+    new THREE.LineBasicMaterial({ color, transparent: true, opacity: 0.9 })));
+  return g;
+}
+
+// ---------- build robot from spec ----------
+function build() {
+  scene.remove(robot); robot = new THREE.Group(); scene.add(robot);
+  robot.position.z = baseHeight();
+
+  // hexagonal-prism body (convex hull of 12 corner verts)
+  const pts = [];
+  for (const z of [HALF_THICKNESS, -HALF_THICKNESS])
+    for (const ang of CORNERS)
+      pts.push(new THREE.Vector3(spec.radius * Math.cos(ang * DEG), spec.radius * Math.sin(ang * DEG), z));
+  robot.add(new THREE.Mesh(new ConvexGeometry(pts), mat(spec.bodyColor)));
+
+  // head marker on the +x face
+  const head = new THREE.Mesh(new THREE.BoxGeometry(0.04, 0.06, 0.04), mat(spec.headColor));
+  head.position.set(0.75 * spec.radius, 0, HALF_THICKNESS / 2);
+  robot.add(head);
+
+  const coxaMat = mat(spec.coxaColor), femurMat = mat(spec.femurColor),
+        tibiaMat = mat(spec.tibiaColor), footMat = mat(spec.footColor);
+  const lc = spec.coxaLen, lf = spec.femurLen, lt = spec.tibiaLen, lr = spec.thickness;
+
+  for (const [legIdx, ang] of CORNERS.entries()) {
+    const legBase = new THREE.Group();
+    legBase.position.set(spec.radius * Math.cos(ang * DEG), spec.radius * Math.sin(ang * DEG), 0);
+    legBase.rotation.z = ang * DEG;
+    robot.add(legBase);
+
+    const coxaJ = new THREE.Group(); coxaJ.rotation.z = spec.restCoxa * DEG; legBase.add(coxaJ);
+    coxaJ.add(capsule([0, 0, 0], [lc, 0, 0], lr, coxaMat));
+
+    const femurB = new THREE.Group(); femurB.position.set(lc, 0, 0); coxaJ.add(femurB);
+    const femurJ = new THREE.Group(); femurJ.rotation.y = spec.restFemur * DEG; femurB.add(femurJ);
+    femurJ.add(capsule([0, 0, 0], [lf, 0, 0], lr, femurMat));
+
+    const tibiaB = new THREE.Group(); tibiaB.position.set(lf, 0, 0); femurJ.add(tibiaB);
+    const tibiaJ = new THREE.Group(); tibiaJ.rotation.y = spec.restTibia * DEG; tibiaB.add(tibiaJ);
+    tibiaJ.add(capsule([0, 0, 0], [lt, 0, 0], lr, tibiaMat));
+    const f = new THREE.Mesh(new THREE.SphereGeometry(spec.footSize, 20, 14), footMat);
+    f.position.set(lt, 0, 0); tibiaJ.add(f);
+
+    // Joint-range wedges on one representative leg (values are shared anyway).
+    // Each is anchored in the joint's parent frame so the rest pose sits inside.
+    if (showRanges && legIdx === 0) {
+      legBase.add(rangeWedge(lc, spec.coxaMin, spec.coxaMax, spec.coxaColor, 0));
+      femurB.add(rangeWedge(lf, spec.femurMin, spec.femurMax, spec.femurColor, -Math.PI / 2));
+      tibiaB.add(rangeWedge(lt, spec.tibiaMin, spec.tibiaMax, spec.tibiaColor, -Math.PI / 2));
+    }
+  }
+  updateMasses();
+}
+
+// Computed masses (kg) = density x geom volume, matching MuJoCo. Body excludes
+// the head marker (per request). Capsule = cylinder + spherical caps.
+function masses() {
+  const r = spec.thickness;
+  const cap = L => Math.PI * r * r * L + (4 / 3) * Math.PI * r ** 3;
+  const bodyVol = (3 * Math.sqrt(3) / 2) * spec.radius ** 2 * (2 * HALF_THICKNESS);
+  const footVol = (4 / 3) * Math.PI * spec.footSize ** 3;
+  const legVol = cap(spec.coxaLen) + cap(spec.femurLen) + cap(spec.tibiaLen);
+  return {
+    body: spec.bodyDensity * bodyVol,
+    legs: spec.legDensity * legVol * 6,
+    foot: spec.footDensity * footVol * 6,
+  };
+}
+function updateMasses() {
+  const m = masses();
+  for (const k of ['body', 'legs', 'foot'])
+    if (massEls[k]) massEls[k].textContent = m[k].toFixed(3) + ' kg';
+}
+
+function frame() {
+  const box = new THREE.Box3().setFromObject(robot);
+  if (box.isEmpty()) return;
+  const c = box.getCenter(new THREE.Vector3());
+  const r = box.getSize(new THREE.Vector3()).length() * 0.6 || 0.5;
+  controls.target.copy(c);
+  camera.position.set(c.x + r, c.y - r * 1.3, c.z + r * 0.8);
+  controls.update();
+}
+
+// ---------- control panel ----------
+// row: [key, label, min, max, step, unit, massKind?]
+const SLIDERS = [
+  ['Geometry', [
+    ['radius', 'circumradius', 0.05, 0.30, 0.001, 'm'],
+    ['coxaLen', 'coxa length', 0.01, 0.20, 0.001, 'm'],
+    ['femurLen', 'femur length', 0.02, 0.30, 0.001, 'm'],
+    ['tibiaLen', 'tibia length', 0.02, 0.40, 0.001, 'm'],
+    ['thickness', 'leg thickness', 0.004, 0.04, 0.001, 'm'],
+    ['footSize', 'foot size', 0.005, 0.05, 0.001, 'm'],
+  ]],
+  ['Rest pose (deg)', [
+    ['restCoxa', 'coxa (yaw)', -180, 180, 1, '°'],
+    ['restFemur', 'femur (lift)', -180, 180, 1, '°'],
+    ['restTibia', 'tibia (knee)', -180, 180, 1, '°'],
+  ]],
+  ['Density (kg/m³)', [
+    ['bodyDensity', 'body', 50, 20000, 10, '', 'body'],
+    ['legDensity', 'legs', 50, 20000, 10, '', 'legs'],
+    ['footDensity', 'feet', 50, 5000, 10, '', 'foot'],
+  ]],
+  ['Actuators (position servo)', [
+    ['kp', 'kp (stiffness)', 5, 600, 5, ''],
+    ['kv', 'kv (damping)', 0.5, 40, 0.5, ''],
+    ['force', 'force limit', 1, 80, 1, 'N·m'],
+  ]],
+  ['Floor friction', [
+    ['frictionSlide', 'slide (tangential)', 0, 3, 0.05, ''],
+    ['frictionTorsion', 'torsion', 0, 1, 0.01, ''],
+    ['frictionRoll', 'roll', 0, 1, 0.01, ''],
+  ]],
+];
+const COLORS = [
+  ['bodyColor', 'body'], ['headColor', 'head'], ['coxaColor', 'coxa'],
+  ['femurColor', 'femur'], ['tibiaColor', 'tibia'], ['footColor', 'foot'],
+];
+
+const bodyEl = document.getElementById('body');
+const massEls = {};   // massKind -> span, filled below; read by updateMasses()
+const decimals = step => step < 1 ? (step <= 0.001 ? 3 : 2) : 0;
+const clamp = (v, lo, hi) => Math.min(hi, Math.max(lo, v));
+
+function addSlider(group, key, label, min, max, step, unit, massKind) {
+  const d = decimals(step);
+  const c = document.createElement('div'); c.className = 'ctl';
+  const row = document.createElement('div'); row.className = 'row';
+  const right = document.createElement('div'); right.className = 'right';
+
+  if (massKind) {
+    const m = document.createElement('span'); m.className = 'mass';
+    massEls[massKind] = m; right.appendChild(m);
+  }
+  const num = document.createElement('input');
+  num.type = 'number'; num.min = min; num.max = max; num.step = step;
+  num.value = (+spec[key]).toFixed(d);
+  const u = document.createElement('span'); u.className = 'unit'; u.textContent = unit;
+  right.appendChild(num); right.appendChild(u);
+
+  const b = document.createElement('b'); b.textContent = label;
+  row.appendChild(b); row.appendChild(right);
+
+  const sl = document.createElement('input');
+  sl.type = 'range'; sl.min = min; sl.max = max; sl.step = step; sl.value = spec[key];
+
+  sl.oninput = () => { spec[key] = +sl.value; num.value = (+sl.value).toFixed(d); build(); };
+  num.onchange = () => {
+    let v = parseFloat(num.value);
+    if (Number.isNaN(v)) v = spec[key];
+    v = clamp(v, min, max);
+    spec[key] = v; sl.value = v; num.value = v.toFixed(d); build();
+  };
+  c.appendChild(row); c.appendChild(sl); group.appendChild(c);
+}
+
+// Dual-thumb min/max control for a joint range (two stacked range inputs).
+function addRange(group, label, keyMin, keyMax, lo, hi, step, unit) {
+  const d = decimals(step);
+  const c = document.createElement('div'); c.className = 'ctl';
+  const row = document.createElement('div'); row.className = 'row';
+  const b = document.createElement('b'); b.textContent = label;
+  const right = document.createElement('div'); right.className = 'right';
+  const nMin = document.createElement('input');
+  nMin.type = 'number'; nMin.min = lo; nMin.max = hi; nMin.step = step;
+  const dash = document.createElement('span'); dash.className = 'dash'; dash.textContent = '–';
+  const nMax = document.createElement('input');
+  nMax.type = 'number'; nMax.min = lo; nMax.max = hi; nMax.step = step;
+  const u = document.createElement('span'); u.className = 'unit'; u.textContent = unit;
+  right.append(nMin, dash, nMax, u);
+  row.append(b, right);
+
+  const dual = document.createElement('div'); dual.className = 'dual';
+  const track = document.createElement('div'); track.className = 'track';
+  const fill = document.createElement('div'); fill.className = 'fill';
+  const sMin = document.createElement('input'); sMin.type = 'range'; sMin.min = lo; sMin.max = hi; sMin.step = step;
+  const sMax = document.createElement('input'); sMax.type = 'range'; sMax.min = lo; sMax.max = hi; sMax.step = step;
+  dual.append(track, fill, sMin, sMax);
+
+  const pct = v => (v - lo) / (hi - lo) * 100;
+  function refresh() {
+    const a = +spec[keyMin], z = +spec[keyMax];
+    nMin.value = a.toFixed(d); nMax.value = z.toFixed(d); sMin.value = a; sMax.value = z;
+    fill.style.left = pct(a) + '%'; fill.style.right = (100 - pct(z)) + '%';
+  }
+  const setMin = v => { v = clamp(v, lo, spec[keyMax]); spec[keyMin] = v; refresh(); build(); };
+  const setMax = v => { v = clamp(v, spec[keyMin], hi); spec[keyMax] = v; refresh(); build(); };
+  sMin.oninput = () => setMin(+sMin.value);
+  sMax.oninput = () => setMax(+sMax.value);
+  nMin.onchange = () => setMin(Number.isNaN(parseFloat(nMin.value)) ? spec[keyMin] : parseFloat(nMin.value));
+  nMax.onchange = () => setMax(Number.isNaN(parseFloat(nMax.value)) ? spec[keyMax] : parseFloat(nMax.value));
+
+  c.append(row, dual); group.append(c);
+  refresh();
+}
+
+function addColor(wrap, key, label) {
+  const l = document.createElement('label'); l.className = 'col';
+  const pick = document.createElement('input'); pick.type = 'color'; pick.value = spec[key];
+  const hex = document.createElement('input');
+  hex.type = 'text'; hex.className = 'hex'; hex.value = spec[key]; hex.spellcheck = false;
+  const name = document.createElement('span'); name.textContent = label;
+
+  pick.oninput = () => { spec[key] = pick.value; hex.value = pick.value; build(); };
+  hex.onchange = () => {
+    let v = hex.value.trim(); if (!v.startsWith('#')) v = '#' + v;
+    if (/^#[0-9a-fA-F]{6}$/.test(v)) { v = v.toLowerCase(); spec[key] = v; pick.value = v; hex.value = v; build(); }
+    else hex.value = spec[key];   // reject invalid, revert
+  };
+  l.append(pick, hex, name); wrap.appendChild(l);
+}
+
+// (Re)build the whole panel from the current spec; called on load too.
+function buildPanel() {
+  bodyEl.innerHTML = '';
+  for (const k in massEls) delete massEls[k];
+
+  const dg = document.createElement('div'); dg.className = 'grp';
+  dg.innerHTML = '<p class="h">Display</p>';
+  const lbl = document.createElement('label'); lbl.className = 'col';
+  const cb = document.createElement('input'); cb.type = 'checkbox'; cb.checked = showRanges;
+  cb.style.accentColor = '#5b9bd5'; cb.style.cursor = 'pointer';
+  cb.onchange = () => { showRanges = cb.checked; build(); };
+  const sp = document.createElement('span'); sp.textContent = 'show joint ranges';
+  lbl.append(cb, sp); dg.appendChild(lbl); bodyEl.appendChild(dg);
+
+  for (const [title, rows] of SLIDERS) {
+    const g = document.createElement('div'); g.className = 'grp';
+    g.innerHTML = `<p class="h">${title}</p>`;
+    for (const r of rows) addSlider(g, ...r);
+    bodyEl.appendChild(g);
+  }
+
+  const rg = document.createElement('div'); rg.className = 'grp';
+  rg.innerHTML = '<p class="h">Joint ranges (deg)</p>';
+  addRange(rg, 'coxa (yaw)', 'coxaMin', 'coxaMax', -180, 180, 1, '°');
+  addRange(rg, 'femur (lift)', 'femurMin', 'femurMax', -180, 180, 1, '°');
+  addRange(rg, 'tibia (knee)', 'tibiaMin', 'tibiaMax', -180, 180, 1, '°');
+  bodyEl.appendChild(rg);
+
+  const cg = document.createElement('div'); cg.className = 'grp';
+  cg.innerHTML = '<p class="h">Colors</p>';
+  const colWrap = document.createElement('div'); colWrap.className = 'colors';
+  for (const [key, label] of COLORS) addColor(colWrap, key, label);
+  cg.appendChild(colWrap); bodyEl.appendChild(cg);
+}
+
+buildPanel();
+
+// ---------- save ----------
+function toConfig() {
+  return {
+    name: document.getElementById('name').value.trim() || 'hexapod',
+    radius: spec.radius,
+    body: {
+      density: spec.bodyDensity, half_thickness: HALF_THICKNESS,
+      color: hexToRgb01(spec.bodyColor), head_color: hexToRgb01(spec.headColor),
+    },
+    legs: {
+      density: spec.legDensity,
+      thickness: spec.thickness,
+      coxa: { length: spec.coxaLen, color: hexToRgb01(spec.coxaColor) },
+      femur: { length: spec.femurLen, color: hexToRgb01(spec.femurColor) },
+      tibia: { length: spec.tibiaLen, color: hexToRgb01(spec.tibiaColor) },
+      foot: { size: spec.footSize, density: spec.footDensity, color: hexToRgb01(spec.footColor) },
+    },
+    rest: { coxa: spec.restCoxa, femur: spec.restFemur, tibia: spec.restTibia },
+    joint_range: {
+      coxa: [spec.coxaMin, spec.coxaMax],
+      femur: [spec.femurMin, spec.femurMax],
+      tibia: [spec.tibiaMin, spec.tibiaMax],
+    },
+    actuator: { kp: spec.kp, kv: spec.kv, force: spec.force },
+    floor: { friction: [spec.frictionSlide, spec.frictionTorsion, spec.frictionRoll] },
+  };
+}
+// inverse of toConfig: apply a loaded spec to the controls + preview.
+const rgb01ToHex = c => '#' + c.map(v => Math.round(clamp(v, 0, 1) * 255).toString(16).padStart(2, '0')).join('');
+function applyConfig(cfg) {
+  spec.radius = cfg.radius;
+  spec.bodyDensity = cfg.body.density; spec.legDensity = cfg.legs.density;
+  spec.footDensity = cfg.legs.foot.density;
+  spec.coxaLen = cfg.legs.coxa.length; spec.femurLen = cfg.legs.femur.length;
+  spec.tibiaLen = cfg.legs.tibia.length; spec.footSize = cfg.legs.foot.size;
+  spec.thickness = cfg.legs.thickness;
+  spec.restCoxa = cfg.rest.coxa; spec.restFemur = cfg.rest.femur; spec.restTibia = cfg.rest.tibia;
+  const jr = cfg.joint_range;
+  spec.coxaMin = jr.coxa[0]; spec.coxaMax = jr.coxa[1];
+  spec.femurMin = jr.femur[0]; spec.femurMax = jr.femur[1];
+  spec.tibiaMin = jr.tibia[0]; spec.tibiaMax = jr.tibia[1];
+  const a = cfg.actuator;
+  spec.kp = a.kp; spec.kv = a.kv; spec.force = a.force;
+  const fr = (cfg.floor && cfg.floor.friction) || [2.0, 0.5, 0.5];
+  spec.frictionSlide = fr[0]; spec.frictionTorsion = fr[1]; spec.frictionRoll = fr[2];
+  spec.bodyColor = rgb01ToHex(cfg.body.color);
+  spec.headColor = rgb01ToHex(cfg.body.head_color || cfg.body.color);
+  spec.coxaColor = rgb01ToHex(cfg.legs.coxa.color); spec.femurColor = rgb01ToHex(cfg.legs.femur.color);
+  spec.tibiaColor = rgb01ToHex(cfg.legs.tibia.color); spec.footColor = rgb01ToHex(cfg.legs.foot.color);
+  buildPanel(); build(); frame();
+}
+
+const statusEl = document.getElementById('status');
+const nameEl = document.getElementById('name');
+
+// Fetch output/<name>.yaml and apply it; throws if the server/file is absent.
+async function loadByName(name) {
+  statusEl.className = ''; statusEl.textContent = 'loading…';
+  const r = await fetch('/load?name=' + encodeURIComponent(name));
+  const j = await r.json();
+  if (!j.ok) throw new Error(j.error || 'load failed');
+  applyConfig(j.config);
+  statusEl.className = 'ok'; statusEl.textContent = `loaded ${j.path}`;
+}
+
+document.getElementById('load').onclick = async () => {
+  try {
+    await loadByName(nameEl.value.trim() || 'hexapod');
+  } catch (e) {
+    statusEl.className = 'err'; statusEl.textContent = 'error: ' + e.message;
+  }
+};
+document.getElementById('save').onclick = async () => {
+  statusEl.className = ''; statusEl.textContent = 'saving…';
+  try {
+    const r = await fetch('/save', {
+      method: 'POST', headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(toConfig()),
+    });
+    const j = await r.json();
+    if (!j.ok) throw new Error(j.error || 'save failed');
+    statusEl.className = 'ok'; statusEl.textContent = `wrote ${j.yaml}\n      ${j.xml}`;
+  } catch (e) {
+    statusEl.className = 'err'; statusEl.textContent = 'error: ' + e.message;
+  }
+};
+document.getElementById('recenter').onclick = frame;
+
+// Default to output/<name>.yaml on startup; fall back to the hardcoded spec if
+// the file or the save-server isn't available (e.g. opened over file://).
+(async () => {
+  try {
+    await loadByName(nameEl.value.trim() || 'hexapod');
+  } catch {
+    statusEl.className = ''; statusEl.textContent = '';
+    build(); frame();
+  }
+})();
+</script>

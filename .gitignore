@@ -1,0 +1,29 @@
+.venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+*.zip
+.DS_Store
+
+# Experiment runs 
+runs/
+
+# machine-local / personal
+.claude/settings.local.json
+.obsidian/
+
+# secrets (in case scripts are ever run from inside the repo dir)
+.gh_token
+.anthropic_key
+.git-credentials
+
+# Scratch / prototyping — scoped to a dir, not a filename prefix (a leading
+# underscore collides with Python's "internal module" convention, e.g. _compat.py).
+scratch/
+**/.DS_Store
+
+# Derived terrain sampling pool (rebuilt from the model by mjx_terrain.load_pool).
+*_pool.npz
+
+# MuJoCo writes this runtime log into the cwd.
+MUJOCO_LOG.TXT

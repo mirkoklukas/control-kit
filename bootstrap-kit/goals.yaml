@@ -1,0 +1,26 @@
+# goals.yaml — the ONLY file you write. The definition of done.
+#
+# Every entry is a TASK: something that can go green or red via its `pass`
+# command. Tasks come in flavors (repo, system, filesystem, ...) but share one
+# shape:
+#
+#   name   short id, used in bootstrap.sh section headers and logs
+#   type   flavor — for grouping/readability (repo | system | filesystem | ...)
+#   do     OPTIONAL. The high-level intent of what to set up. The agent
+#          discovers the concrete steps and writes them into bootstrap.sh.
+#          Omit for pure assertions that just have to hold true.
+#   pass   REQUIRED. The oracle: a command that exits 0 when this task is done.
+#          If you don't know the exact command, describe it; the goal is for it
+#          to become a real runnable check.
+
+tasks:
+  - name: run-kit
+    type: repo
+    do:   install https://github.com/mirkoklukas/run-kit
+    pass: uv run --extra dev pytest
+    
+  - name: control-kit
+    type: repo
+    do:   install https://github.com/mirkoklukas/control-kit
+    note: Needs to have the same parent folder as `run-kit`.
+    pass: uv run --extra vm python -m lab.hexapod_ppo.v0.smoke ; echo "exit=$?"

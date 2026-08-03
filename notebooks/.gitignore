@@ -1,0 +1,8 @@
+# Ignore everything in this directory by default...
+*
+# ...except this file and the `staged/` holding area (notebooks being promoted
+# toward a clean/published form). `!staged` alone re-includes the dir but `*`
+# still catches the files inside it, so the deeper globs are required.
+!.gitignore
+!staged/
+!staged/**
