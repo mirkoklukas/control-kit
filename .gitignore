@@ -2,9 +2,11 @@
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
-runs/
 *.zip
 .DS_Store
+
+# Experiment runs 
+runs/
 
 # machine-local / personal
 .claude/settings.local.json

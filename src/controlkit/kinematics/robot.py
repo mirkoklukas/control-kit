@@ -339,7 +339,7 @@ class Robot:
         Returns:
             (num_legs, 3) unit vectors in the world frame.
         """
-        sh = self.shoulders(posture.body)
+        sh = (posture.body @ self.mounts).rotation()
         return jax.vmap(lambda s, t: s @ self.leg.contact_vector(t))(sh, posture.thetas)
 
     def reach_mask(self, key: jax.Array, body: SE3, footholds: Foothold, *,
@@ -430,15 +430,23 @@ class Robot:
                 foot_radius: float = 0.02, body_margin: float = 0.0,
                 body_half_height: float = 0.05, base_pos=(0.0, 0.0, 0.0),
                 weld_feet: bool = True, body_density: float = None,
-                leg_density: float = None, foot_density: float = None) -> str:
+                leg_density: float = None, foot_density: float = None,
+                actuators: bool = False, kp: float = 10.0, kv: float = None,
+                forcerange=None, joint_damping: float = 0.0, armature: float = None,
+                frictionloss: float = None, base_material: str = None,
+                foot_material: str = None, link_materials=None) -> str:
         """A MuJoCo MJCF (XML) of the robot's kinematics, as a string.
 
         A direct transcription of the chain: each leg body is ``mounts[i]`` then the
         leg's ``offsets`` (body ``pos``/``quat``), each joint carries the leg's
         ``axes[k]`` and limit ``range``, each link a capsule, each foot a sphere. The
-        body is one box spanning the mounts (:meth:`mount_box`). Since a ``Robot`` is
-        pure kinematics, this is a *collision/kinematic* model -- geometry and joints,
-        with no actuators or damping.
+        body is one box spanning the mounts (:meth:`mount_box`). By default this is a
+        pure *collision/kinematic* model -- geometry and joints, no actuators or
+        damping -- which is what the force model (:func:`controlkit.forces.model_from_robot`)
+        and the viz build on. Pass ``actuators=True`` for a *controllable* model: one
+        ``<position>`` servo per leg joint (``kp``, ``ctrlrange`` = joint limits), the
+        model a controller/MPC drives. ``joint_damping`` adds passive joint damping
+        independently (it is a joint property, on with or without actuators).
 
         Mass comes from geom density: each part's density defaults to ``None`` (leave
         it to MuJoCo's own default of 1000), or pass ``body_density`` / ``leg_density``
@@ -466,9 +474,25 @@ class Robot:
             body_density: density (kg/m^3) of the body box; None -> MuJoCo default.
             leg_density: density of the link capsules; None -> MuJoCo default.
             foot_density: density of the foot spheres; None -> MuJoCo default.
+            actuators: emit a ``<position>`` servo per leg joint (``nu = num_legs *
+                num_joints``). Off by default, keeping the pure-kinematics model.
+            kp: position-servo gain (only when ``actuators``).
+            kv: position-servo damping (velocity gain); None omits it.
+            forcerange: ``(lo, hi)`` actuator force limit; None omits it.
+            joint_damping: passive damping on every leg joint; 0 emits none.
+            armature: reflected rotor inertia on every joint; None omits it.
+            frictionloss: dry friction on every joint; None omits it.
+            base_material: name of a material for the trunk box; None -> no material.
+            foot_material: name of a material for the feet; None -> no material.
+            link_materials: material(s) for the link capsules -- a single name for
+                all, or a per-link list of length ``num_joints``; None -> none. The
+                caller must declare any named material in an ``<asset>`` block.
 
         Returns:
-            The MJCF as a string.
+            The MJCF as a string. The repeated per-part attributes (joint type +
+            damping, servo ``kp``, capsule/sphere/box ``type``/``size``/``density``/
+            ``material``) are factored into ``<default>`` classes (``link``,
+            ``foot``, ``base``); the per-element lines carry only what varies.
         """
         import numpy as np
 
@@ -478,10 +502,26 @@ class Robot:
         def dens(d):
             return f' density="{d:.9g}"' if d is not None else ""
 
+        def mat(m):
+            return f' material="{m}"' if m else ""
+
+        def attr(name, v):
+            return f' {name}="{v:.9g}"' if v is not None else ""
+
         body_d, leg_d, foot_d = dens(body_density), dens(leg_density), dens(foot_density)
+        base_mat, foot_mat = mat(base_material), mat(foot_material)
+        # joint + servo defaults (armature/frictionloss/kv/forcerange omitted when None)
+        joint_attrs = (f' damping="{joint_damping:.9g}"' if joint_damping else "") \
+            + attr("armature", armature) + attr("frictionloss", frictionloss)
+        fr = f' forcerange="{forcerange[0]:.9g} {forcerange[1]:.9g}"' if forcerange else ""
+        servo_attrs = f'kp="{kp:.9g}"' + attr("kv", kv) + fr
 
         leg = self.leg
         n = leg.num_joints
+        if link_materials is None or isinstance(link_materials, str):
+            link_mats = [mat(link_materials)] * n
+        else:
+            link_mats = [mat(m) for m in link_materials]         # per-link list
         axes = np.asarray(leg.axes)                               # (n, 3)
         limits = np.asarray(leg.limits)                           # (n, 2), radians
         off_t = np.asarray(leg.offsets.translation())            # (n, 3)
@@ -495,6 +535,29 @@ class Robot:
         # The link on body k runs to the next body's origin (the foot for the last).
         child_t = [off_t[k + 1] if k < n - 1 else tool_t for k in range(n)]
 
+        # <default> classes: everything the per-element lines would otherwise repeat.
+        # A ``j{k}`` class per joint index carries that joint's axis + range (and the
+        # servo ctrlrange) -- shared across legs, since every leg is identical.
+        pos_default = f'    <position {servo_attrs}/>\n' if actuators else ""
+
+        def jclass(k):
+            rng = f'{limits[k, 0]:.9g} {limits[k, 1]:.9g}'
+            ctrl = f'<position ctrlrange="{rng}"/>' if actuators else ""
+            return (f'    <default class="j{k}">'
+                    f'<joint axis="{vec(axes[k])}" range="{rng}"/>{ctrl}</default>\n')
+
+        joint_classes = "".join(jclass(k) for k in range(n))
+        defaults = (
+            "  <default>\n"
+            f'    <joint type="hinge"{joint_attrs}/>\n'
+            f"{pos_default}"
+            f'    <default class="link"><geom type="capsule" size="{link_radius:.9g}"{leg_d}/></default>\n'
+            f'    <default class="foot"><geom type="sphere" size="{foot_radius:.9g}"{foot_d}{foot_mat}/></default>\n'
+            f'    <default class="base"><geom type="box"{body_d}{base_mat}/></default>\n'
+            f"{joint_classes}"
+            "  </default>\n"
+        )
+
         def leg_xml(i):
             s = []
             for k in range(n):
@@ -502,11 +565,10 @@ class Robot:
                     s.append(f'<body name="leg{i}_0" pos="{vec(b0_t[i])}" quat="{vec(b0_q[i])}">')
                 else:
                     s.append(f'<body name="leg{i}_{k}" pos="{vec(off_t[k])}" quat="{vec(off_q[k])}">')
-                s.append(f'  <joint name="leg{i}_j{k}" type="hinge" axis="{vec(axes[k])}" '
-                         f'range="{limits[k, 0]:.9g} {limits[k, 1]:.9g}"/>')
-                s.append(f'  <geom type="capsule" fromto="0 0 0 {vec(child_t[k])}" size="{link_radius:.9g}"{leg_d}/>')
+                s.append(f'  <joint class="j{k}" name="leg{i}_j{k}"/>')
+                s.append(f'  <geom class="link" fromto="0 0 0 {vec(child_t[k])}"{link_mats[k]}/>')
             s.append(f'<body name="foot{i}" pos="{vec(tool_t)}" quat="{vec(tool_q)}">')
-            s.append(f'  <geom name="foot{i}" type="sphere" size="{foot_radius:.9g}"{foot_d}/>')
+            s.append(f'  <geom class="foot" name="foot{i}"/>')
             if weld_feet:
                 s.append(f'  <site name="foot{i}" size="{0.5 * foot_radius:.9g}"/>')
             s.append("</body>")                                   # foot
@@ -521,17 +583,25 @@ class Robot:
                 f'    <weld name="weld_foot{i}" body1="foot{i}" torquescale="0" active="false"/>'
                 for i in range(self.num_legs))
             equality = f'  <equality>\n{welds}\n  </equality>\n'
+        actuation = ""
+        if actuators:
+            servos = "\n".join(
+                f'    <position class="j{k}" name="leg{i}_j{k}" joint="leg{i}_j{k}"/>'
+                for i in range(self.num_legs) for k in range(n))
+            actuation = f'  <actuator>\n{servos}\n  </actuator>\n'
         return (
             f'<mujoco model="{name}">\n'
             f'  <compiler angle="radian" autolimits="true"/>\n'
+            f'{defaults}'
             f'  <worldbody>\n'
             f'    <body name="base" pos="{vec(base_pos)}">\n'
             f'      <freejoint name="root"/>\n'
-            f'      <geom name="base" type="box" pos="{vec(center)}" size="{vec(half)}"{body_d}/>\n'
+            f'      <geom class="base" name="base" pos="{vec(center)}" size="{vec(half)}"/>\n'
             f'{legs}\n'
             f'    </body>\n'
             f'  </worldbody>\n'
             f'{equality}'
+            f'{actuation}'
             f'</mujoco>\n'
         )
 
