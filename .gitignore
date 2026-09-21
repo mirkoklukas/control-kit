@@ -10,7 +10,7 @@ runs/
 
 # machine-local / personal
 .claude/settings.local.json
-.obsidian/workspace.json
+.obsidian/
 
 # secrets (in case scripts are ever run from inside the repo dir)
 .gh_token

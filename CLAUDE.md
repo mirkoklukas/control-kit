@@ -35,6 +35,4 @@ The main goal is locomotion for a hexapod robot platform.
   better.
 
 ## Project Context
-Project-specific docs (load on demand):
-- `docs/repo-structure.md`  It is NOT an inventory and may be incomplete — never use it to find a file by filename, and 
-  never use it as a substitute for inspecting the filesystem.
+See `design.md` at the repo root for the content and organization of the repo.

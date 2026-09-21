@@ -1,6 +1,6 @@
 # Baseline A100-40GB: walk straight +x, full 50M-step budget.
 # Complete config (every Cfg field) -- self-contained, independent of config.py defaults.
-#   uv run --extra vm python -m lab.hexapod_ppo.v0.run exp:configs/baseline.yaml --tag=baseline
+#   uv run --extra vm python -m lab.hexapod_ppo.v1.run exp:config.yaml --tag=baseline
 
 # --- task ---
 vx: 0.3                     # commanded forward speed (m/s)

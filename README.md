@@ -58,34 +58,36 @@ On a GPU box you can still force CPU without a separate env:
 Quick sanity check (headless, no display needed):
 
 ```bash
-uv run python examples/01_mpc_cartpole.py record   # MPPI swing-up (cold: pumps but doesn't fully catch yet)
+uv run ctk --help                                            # the controlkit CLI is installed
+uv run python -c "import controlkit, jax; print('ok', jax.default_backend())"
 ```
 
 ## Note on the viewer
 
 The interactive MuJoCo viewer needs a local display, so run with `--render` on your own machine, not in a remote/headless sandbox.
 
-## Model
+## Models
 
-`models/cartpole.xml` — slider (cart) + hinge (pole). Hinge angle `0` is
-upright, `π` is hanging down. Single force actuator on the cart, `ctrlrange
-[-20, 20]`.
+MuJoCo MJCF models live in `models/`. `models/hexapod.xml` is the radial hexapod
+used by the PPO experiment; the kinematics library can also generate models via
+`ctk model-gen`.
 
 ## Layout
 
 ```
-src/controlkit/   shared library (mpc, reward, viz); the `ctk` CLI lives here
-lab/              experiments built on controlkit (see lab/README.md)
-models/           MuJoCo MJCF models
-docs/             notes and design docs
-bootstrap-kit/    scripts to bootstrap a remote GPU box
-examples/         standalone, self-contained scripts
-runs/             immutable run dirs: config + checkpoints + results (gitignored)
+src/controlkit/    shared library (kinematics, mpc, reward, viz); the `ctk` CLI lives here
+lab/               experiments built on controlkit (see lab/README.md)
+models/            MuJoCo MJCF models
+notebooks/staged/  notebooks being promoted toward a clean form
+tools/             browser-based MJCF generator + viewer
+bootstrap-kit/     scripts to bootstrap a remote GPU box
+runs/              immutable run dirs: config + checkpoints + results (gitignored)
 ```
 
 `src/controlkit` is the shared library; `lab` is where the churny,
 experiment-specific work happens and depends on it (never the reverse). A helper
-that outgrows one experiment moves into `controlkit`.
+that outgrows one experiment moves into `controlkit`. See [`design.md`](design.md)
+for the full content and organization of the repo.
 
 ## Running experiments
 

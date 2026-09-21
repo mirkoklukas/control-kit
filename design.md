@@ -2,13 +2,11 @@
 
 A MuJoCo playground for control algorithms (classical control, MPC, RL), targeting
 a hexapod / radial-legged robot. This document maps the repo's **content and
-organization** as it stands, as the basis for cleanup and going public.
+organization**.
 
-Scope note: this map covers the tracked, non-`docs` tree. Of the `lab/`
-experiments it documents only `lab/controller` and `lab/hexapod_ppo/v1`; of the
-notebooks only `notebooks/staged`. Everything gitignored (`runs/`, `scratch/`,
-`.venv/`, `MUJOCO_LOG.TXT`, checkpoints, `*_pool.npz`, …) is out of scope. See
-[Out of scope](#out-of-scope) for the rest.
+Everything gitignored is out of scope here (`runs/`, `scratch/`, `.venv/`,
+`MUJOCO_LOG.TXT`, checkpoints, `*_pool.npz`, …); see
+[Out of scope](#out-of-scope).
 
 ---
 
@@ -29,7 +27,7 @@ runs.
   `python -m lab.<exp>.run` — just not a shared import target the way
   `controlkit` is.
 - **`runkit`** — the run harness: immutable run dirs, captured provenance. Its
-  own repo (`../run-kit`), consumed here as an editable path dependency.
+  own repo, consumed here as a dependency.
 
 ---
 
@@ -39,12 +37,10 @@ runs.
 |-------------------|------|
 | `src/controlkit/` | The shared library + the `ctk` CLI entry point. |
 | `lab/`            | Experiments built on `controlkit` (see [Experiments](#experiments-lab)). |
-| `models/`         | MuJoCo MJCF models (cartpole, hexapod variants, sticky-feet, weld/climb test scenes). |
-| `examples/`       | Standalone, self-contained scripts (minimal sim, MPC cartpole/hexapod, forces, runkit). |
-| `notebooks/`      | Exploration notebooks; only `notebooks/staged/` is in scope here. |
-| `tools/`          | Small browser-based helpers (`model_generator`, `model_viz`) — MJCF authoring/viewing served over HTTP. |
-| `bootstrap-kit/`  | Scripts + notes to bring up a remote GPU box (env, machine facts, pull). |
-| `docs/`           | Notes and design docs (**out of scope for this map**). |
+| `models/`         | MuJoCo MJCF models. |
+| `notebooks/`      | Exploration notebooks; `notebooks/staged/` holds the ones being cleaned up. |
+| `tools/`          | Browser-based helpers (`model_generator`, `model_viz`) — MJCF authoring/viewing over HTTP. |
+| `bootstrap-kit/`  | Scripts + notes to bring up a remote GPU box (assume host-specific config; adapt to your own). |
 | `README.md`       | Setup (uv + `mjx`/`gpu` extras), layout, how to run experiments. |
 | `pyproject.toml`  | Package metadata, dependency extras, `ctk` script, ruff config. |
 | `runs/`, `scratch/` | Gitignored — experiment outputs and prototyping. |
@@ -95,7 +91,6 @@ Layered bottom-up, each layer ignorant of the one above (pure JAX):
 | `mujoco_viz.py`   | Minimal MuJoCo-viewer view of a `Robot` (`ctk posture`). |
 | `rerun_viz/`      | Rerun-based robot viz from body pose + per-leg angles (`colors`, `draw`, `robot`, `session`, `shapes`). |
 | `ui.py`           | Shared terminal UI helpers. |
-| `rerun_viz_RETIRED.py` | Superseded single-file viz — **cleanup candidate**. |
 
 ### CLI — `cli.py`
 Umbrella Typer app mounting subcommands: `viz` (replay/plot `.npz`), `model-gen`,
@@ -107,10 +102,9 @@ Umbrella Typer app mounting subcommands: `viz` (replay/plot `.npz`), `model-gen`
 
 Recommended (not enforced) shape per experiment: `config.py` (knobs) · `env.py`
 (system wiring) · `run.py` (`python -m lab.<exp>.run [config] key=val …`) ·
-`viz.py`. Outputs land in gitignored `runs/`. Only the two in-scope experiments
-are documented here.
+`viz.py`. Outputs land in gitignored `runs/`.
 
-### `lab/controller/` — interactive posture control *(untracked; in active design)*
+### `lab/controller/` — interactive posture control
 Sculpt a **target posture** with a PlayStation DualSense and have the simulated
 robot drive itself onto it. Runs entirely local on the Mac (pad on USB + passive
 viewer need a display), one real-time loop:
@@ -132,8 +126,7 @@ DualSense → edit target Posture → policy → ctrl → mj_step → passive vi
 | `scene.xml`  | The MuJoCo scene for the loop. |
 
 Status: M1a/M1b done (fly the mocap target; welded-feet MPPI chases it); M2
-(unweld + balance + mode switching) open. **Note:** this dir is currently
-untracked in git.
+(unweld + balance + mode switching) open.
 
 ### `lab/hexapod_ppo/v1/` — PPO locomotion
 Train the radial hexapod to **walk straight in +x** with PPO (Brax on MJX). Real
@@ -152,34 +145,30 @@ runs on a GPU box (`--extra vm`); output to immutable runkit run dirs under `run
 
 ## Notebooks — `notebooks/staged/`
 
-Only `staged/` is in scope (whitelisted in `notebooks/.gitignore`). It is the
-holding area for notebooks being promoted toward clean/published form.
+`staged/` is the holding area for notebooks being promoted toward clean/published
+form (the rest of `notebooks/` is exploratory and gitignored).
 
 - `10_stable_postures.ipynb` — sampling/selecting stable postures (JAX), built on
   `controlkit.kinematics`.
-
-(The larger flat `notebooks/*.ipynb` set is exploratory and out of scope here.)
 
 ---
 
 ## Supporting directories
 
-- **`models/`** — MJCF scenes: `cartpole.xml`, `hexapod{,1,2}.xml`, `climb0.xml`,
-  `weld0.xml`, and sticky-feet variants used by IK/stance experiments.
-- **`examples/`** — runnable, self-contained: `00_minimal`, `01_mpc_cartpole`,
-  `02_mpc_hexapod`, `03_forces_hexapod`, `04_runkit_experiment`.
+- **`models/`** — MJCF scenes. `hexapod.xml` is used by `lab/hexapod_ppo/v1`;
+  `weld0.xml` illustrates the foot-weld equality referenced in `robot.py`.
 - **`tools/`** — `model_generator/` (browser MJCF generator + server) and
   `model_viz/` (browser MJCF viewer + server).
 - **`bootstrap-kit/`** — remote GPU box bringup: `bootstrap.sh`, `prep.sh`,
-  `pull.sh`, `machine-facts.sh`, `goals.yaml`, plus notes (`BOOTSTRAP.md`,
-  `ENVIRONMENT.md`, `BLOCKERS.md`, `LOG.md`).
+  `pull.sh`, `machine-facts.sh`, `goals.yaml`, plus notes. Host/git-host specifics
+  are baked in; adapt them to your own infra.
 
 ---
 
 ## Packaging & environments
 
 Managed with `uv`; one `pyproject.toml` yields a CPU env on the laptop and a GPU
-env on the cloud box via extras:
+env on a cloud box via extras:
 
 | Extra   | Contents / purpose |
 |---------|--------------------|
@@ -190,16 +179,11 @@ env on the cloud box via extras:
 | `sb3`   | `stable-baselines3` (Torch) — kept separate to avoid CUDA-wheel clashes with jax. |
 | `dev`   | `ipython`, `ruff`. |
 
-`runkit` is a local editable path dep (`../run-kit`).
-
 ---
 
 ## Out of scope
 
-Not covered by this map (and mostly excluded from a public cut): `docs/`;
-gitignored `runs/`, `scratch/`, `.venv/`, `MUJOCO_LOG.TXT`, `*_pool.npz`,
-checkpoints; the exploratory flat notebooks under `notebooks/` outside `staged/`;
-`lab/` experiments other than `controller` and `hexapod_ppo/v1`
-(`gait_graph`, `hexapod_mpc`, `hexapod_ppo/v0`, `ik`, `joystick`, `mock_exp`,
-`posture`, `posture_graph`, `stance_graph`); editor state (`.obsidian/`,
-`.ruff_cache/`).
+Not part of this tree: everything gitignored (`runs/`, `scratch/`, `.venv/`,
+`MUJOCO_LOG.TXT`, `*_pool.npz`, checkpoints), the exploratory notebooks under
+`notebooks/` outside `staged/`, and editor state. Earlier / exploratory
+experiments and full history live on the private `dev` branch, not on `main`.
