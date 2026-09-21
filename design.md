@@ -14,21 +14,21 @@ notebooks only `notebooks/staged`. Everything gitignored (`runs/`, `scratch/`,
 
 ## The core idea
 
-Two layers, dependency pointing one way only:
-
-```
-lab/<experiment>   ──imports──▶   controlkit          runkit
- (churny, per-system)             (shared library)    (run harness, separate repo)
-```
+The repo is two layers with a strictly one-way dependency: experiments in `lab/`
+import from the shared `controlkit` library, never the reverse. A helper that
+outgrows a single experiment graduates *up* into `controlkit`. Alongside both
+sits `runkit`, a separate run harness (its own repo) for staging and tracking
+runs.
 
 - **`controlkit`** (`src/`) — the reusable library: kinematics, MPC, rewards,
-  forces, model generation, visualization, CLI. Stable, tested-by-use, no
-  experiment-specific logic.
-- **`lab/`** — the experiments built on `controlkit`. Code is allowed to be
-  messy here; a helper that outgrows one experiment graduates *up* into
-  `controlkit`. Experiments never import each other and the library never
-  imports `lab`.
-- **`runkit`** — the run harness (immutable run dirs, provenance). Lives in its
+  forces, model generation, visualization, CLI. Stable, no experiment-specific
+  logic.
+- **`lab/`** — the experiments built on `controlkit`; code is allowed to be
+  messy here. Experiments *shouldn't* import each other (a convention, not
+  enforced). `lab` is itself a packaged, importable namespace — hence
+  `python -m lab.<exp>.run` — just not a shared import target the way
+  `controlkit` is.
+- **`runkit`** — the run harness: immutable run dirs, captured provenance. Its
   own repo (`../run-kit`), consumed here as an editable path dependency.
 
 ---
