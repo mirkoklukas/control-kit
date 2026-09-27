@@ -366,17 +366,20 @@ class Robot:
             (M, num_legs) bool: ``[j, i]`` is True iff leg ``i`` can reach
             foothold ``j``.
         """
-        shoulders = self.shoulders(body)
+        shoulders_inv = self.shoulders(body).inverse()
 
-        def per_foothold(k, foothold):
+        footholds_transformed = footholds[:,None].transform(shoulders_inv)
+
+        def per_transformed_foothold(k, fhs):
             leg_keys = jax.random.split(k, self.num_legs)
             return jax.vmap(
-                lambda lk, sh: self.leg.reach(
-                    lk, foothold.transform(sh.inverse()), samples=samples, **kwargs)
-            )(leg_keys, shoulders)
+                lambda lk, fh: self.leg.reach(
+                    lk, fh, samples=samples, **kwargs)
+            )(leg_keys, fhs)
 
-        return jax.vmap(per_foothold)(                            # over footholds -> rows
-            jax.random.split(key, footholds.shape[0]), footholds)
+        keys = jax.random.split(key, footholds_transformed.shape[0])
+        return jax.vmap(per_transformed_foothold)(keys, footholds_transformed)
+            
 
     def sample_posture(self, key: jax.Array, body: SE3, support: Support, *,
                        xyz_limits=None, rpy_limits=None, seq: str = "xyz"):
@@ -425,6 +428,15 @@ class Robot:
         thetas = thetas.at[support.ids].set(planted)              # scatter
 
         return jnp.all(oks), Posture(body, thetas)
+
+    def sample_planted_leg(self, key, body, i, site, *, rpy_limits=None):
+        shoulder = self.shoulders(body)[i]
+        return self.leg.sample_planted(key, site.transform(shoulder.inverse()), 
+                                       limits=rpy_limits)
+
+    def sample_free_leg(self, key: jax.Array, *, rpy_limits=None):
+        return self.leg.sample_free(key, limits=rpy_limits)
+
 
     def to_mjcf(self, *, name: str = "robot", link_radius: float = 0.015,
                 foot_radius: float = 0.02, body_margin: float = 0.0,

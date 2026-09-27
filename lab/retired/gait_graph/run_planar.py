@@ -6,8 +6,8 @@ gate by stability), sample a next stance ``∝ softmax(beta·score)``, step onto
 and record the ``(stance, posture)`` sequence. The postures form a replayable
 qpos trajectory for ``models/weld0.xml`` (quasi-static keyframes, no dynamics).
 
-    uv run --extra mjx python -m lab.gait_graph.run_planar --tag=planar
-    uv run --extra mjx python -m lab.gait_graph.run_planar T=30 task_vxy='[0.15,0.0]' S=800
+    uv run --extra mjx python -m lab.retired.gait_graph.run_planar --tag=planar
+    uv run --extra mjx python -m lab.retired.gait_graph.run_planar T=30 task_vxy='[0.15,0.0]' S=800
 
 Outputs land in ctx.out/results: rollout.npz (qpos/feet/scores) + rollout.png
 (body path + support polygons).
@@ -26,10 +26,10 @@ from jaxlie import SE3
 
 from runkit import RunContext, experiment, main
 
-from lab.gait_graph.branch import branch
-from lab.gait_graph.kinematics import PLANTED
-from lab.gait_graph.stance import Posture, Stance, complement, infer_posture
-from lab.gait_graph.task import Task
+from lab.retired.gait_graph.branch import branch
+from lab.retired.gait_graph.kinematics import PLANTED
+from lab.retired.gait_graph.stance import Posture, Stance, complement, infer_posture
+from lab.retired.gait_graph.task import Task
 
 ROOT = Path(__file__).resolve().parents[2]
 MODEL = ROOT / "models" / "weld0.xml"

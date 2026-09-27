@@ -13,11 +13,11 @@ import jax.numpy as jnp
 import jax
 from jaxlie import SE3, SO3
 
-from lab.stance_graph.kinematics import (
+from lab.retired.stance_graph.kinematics import (
     infer_posture,
     stability_scorer,
 )
-from lab.stance_graph.mjx_sample import (
+from lab.retired.stance_graph.mjx_sample import (
     body_sampler,
     foot_sampler,
 )

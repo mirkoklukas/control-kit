@@ -71,14 +71,14 @@ Jacobians enter the balance), not a physical weld. The welds matter only for
 Scoring only (start here):
 
 ```bash
-uv run --extra mjx python -m lab.stance_graph.benchmark_scoring \
+uv run --extra mjx python -m lab.retired.stance_graph.benchmark_scoring \
     batch_sizes='[256,1024,4096,16384,65536]' n_stances=8000 --tag=a100
 ```
 
 Full sweep (scoring + settle dynamics):
 
 ```bash
-uv run --extra mjx python -m lab.stance_graph.benchmark \
+uv run --extra mjx python -m lab.retired.stance_graph.benchmark \
     batch_sizes='[256,1024,4096,16384]' step_counts='[50,200,800]' \
     n_stances=8000 --tag=a100
 ```

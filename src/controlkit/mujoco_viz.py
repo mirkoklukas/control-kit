@@ -126,7 +126,7 @@ def _weld_support(model, data, num_legs: int, qpos: np.ndarray, support):
 
     Places the robot at ``qpos``, reads each planted foot's world pose, and writes
     the weld target (``eq_data`` relpose = world-in-foot = the *inverse* foot pose,
-    per :mod:`lab.stance_graph.mjx_weld`) before toggling ``eq_active``. Needs the
+    per :mod:`lab.retired.stance_graph.mjx_weld`) before toggling ``eq_active``. Needs the
     model to carry the welds (``Robot.to_mjcf(weld_feet=True)``, the default).
 
     Args:
@@ -166,7 +166,7 @@ def show(robot, postures, *, support=None, loop: bool = True, fps: float = 30.0,
     (:func:`_weld_support`), so the model is set up as that stance -- useful for
     handing to a dynamics pipeline. It is *not* simulated here: the standalone export
     (default geom density, no damping, no contact surface) does not settle cleanly;
-    physical settling is :mod:`lab.stance_graph.mjx_weld`'s job, with a tuned model.
+    physical settling is :mod:`lab.retired.stance_graph.mjx_weld`'s job, with a tuned model.
 
     On macOS this relaunches under ``mjpython``; it cannot run in a Jupyter kernel
     (use :func:`render` there).

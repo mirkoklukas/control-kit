@@ -17,7 +17,7 @@ Everything the experiment needs lives here; the physics primitives come from the
 sibling ``mjx_*`` modules. Outputs land in the runkit run dir (``ctx.out``).
 
 Run (on the A100):
-    uv run --extra mjx python -m lab.stance_graph.benchmark \
+    uv run --extra mjx python -m lab.retired.stance_graph.benchmark \
         batch_sizes='[256,1024,4096,16384]' step_counts='[50,200,800]' --tag=a100
 """
 import csv as _csv
@@ -30,12 +30,12 @@ import jax.numpy as jnp
 
 from runkit import experiment, RunContext, main
 
-from lab.stance_graph.kinematics import from_te, infer_posture, SHOULDERS
-from lab.stance_graph.sample import body_sampler
-from lab.stance_graph.mjx_sample import _leg_reach_mask
-from lab.stance_graph.mjx_stance import MODEL, load_model, to_qpos, stance_forces_batch
-from lab.stance_graph import mjx_terrain as terrain
-from lab.stance_graph.mjx_weld import weld_in_place
+from lab.retired.stance_graph.kinematics import from_te, infer_posture, SHOULDERS
+from lab.retired.stance_graph.sample import body_sampler
+from lab.retired.stance_graph.mjx_sample import _leg_reach_mask
+from lab.retired.stance_graph.mjx_stance import MODEL, load_model, to_qpos, stance_forces_batch
+from lab.retired.stance_graph import mjx_terrain as terrain
+from lab.retired.stance_graph.mjx_weld import weld_in_place
 
 
 # --------------------------------------------------------------------------- #

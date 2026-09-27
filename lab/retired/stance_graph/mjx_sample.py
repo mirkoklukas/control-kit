@@ -17,13 +17,13 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from lab.stance_graph.kinematics import (
+from lab.retired.stance_graph.kinematics import (
     _infer_theta,
     SHOULDERS,
     LENGTHS,
     JOINT_RANGES,
 )
-from lab.stance_graph.sample import body_sampler, XYZ_DELTA, RPY_DELTA  # noqa: F401 (re-export)
+from lab.retired.stance_graph.sample import body_sampler, XYZ_DELTA, RPY_DELTA  # noqa: F401 (re-export)
 
 
 # Locality-kernel std (metres) on the terrain, centred on each free leg's current

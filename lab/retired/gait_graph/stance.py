@@ -18,7 +18,7 @@ from functools import partial
 import jax
 import jax.numpy as jnp
 
-from lab.gait_graph.kinematics import (
+from lab.retired.gait_graph.kinematics import (
     JOINT_RANGES,
     LENGTHS,
     SHOULDERS,

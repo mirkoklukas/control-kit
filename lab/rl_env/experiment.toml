@@ -1,0 +1,12 @@
+# How runkit starts the experiments in this folder, read before they are imported:
+#   runkit run lab.rl_env.test_policy steps=10e6 --tag=gait
+# relaunches as `uv run --project <repo> --extra mjx --extra sb3 python -m runkit ...`.
+# Machine differences (GPU wheels) live in pyproject.toml's markers, not here.
+
+[env]
+root = "./runs"            # <repo>/runs, whichever folder you launch from
+extras = ["mjx"]               # MuJoCo / JAX: model.py imports jax
+
+[env.test_policy]
+extras = ["mjx", "sb3"]        # + stable-baselines3 (torch) for PPO on CPU. Not `gpu`:
+                               # its CUDA 12 wheels clash with torch's (see pyproject.toml)

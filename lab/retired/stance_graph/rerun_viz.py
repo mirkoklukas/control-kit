@@ -24,7 +24,7 @@ import jax.numpy as jnp
 import rerun as rr
 from jaxlie import SE3, SO3
 
-from lab.stance_graph.kinematics import infer_joint_xpos
+from lab.retired.stance_graph.kinematics import infer_joint_xpos
 
 BODY_COLOR = (66, 135, 245)       # hex body
 FREE_COLOR = (90, 90, 90)         # leg segments

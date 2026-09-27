@@ -14,7 +14,7 @@ they collide with each other and the robot with itself. The floor is visual only
 (``0/0``) -- the planted feet rest on it by design, that is not a collision to
 avoid. So ``data.ncon > 0`` means "a link hit an obstacle, or the robot hit itself".
 
-Run:  uv run --extra mjx python lab/posture_graph/collision.py
+Run:  uv run --extra mjx python lab/retired/posture_graph/collision.py
 """
 
 import time

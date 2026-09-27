@@ -17,7 +17,7 @@ Method -- static equilibrium at qvel = qacc = 0:
 A planted foot with normal force <= 0 means the stance can't be held there (the
 foot would have to pull / it lifts) -- a tip-over signal.
 
-This is the ``lab/posture`` variant of ``lab/stance_graph/mjx_stance``, wired to the
+This is the ``lab/retired/posture`` variant of ``lab/retired/stance_graph/mjx_stance``, wired to the
 4-DOF-per-leg model ``6x4DOF.xml`` (24 joint DOF). Everything below is written in
 terms of ``nf`` legs and ``(nv - 6) / nf`` joints per leg, so it does not assume a
 particular joint count.

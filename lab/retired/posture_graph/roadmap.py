@@ -24,7 +24,7 @@ This is one *mode* (a fixed contact set). A full roadmap layers modes and adds
 lift/place edges between them, plus stability and force filters -- none of that is
 here. This is the skeleton.
 
-Run:  uv run --extra mjx python lab/posture_graph/roadmap.py
+Run:  uv run --extra mjx python lab/retired/posture_graph/roadmap.py
 """
 
 import time

@@ -1,0 +1,331 @@
+<mujoco model="spider">
+  <compiler angle="radian"/>
+
+  <option impratio="10" gravity="0 0 9.81" integrator="implicitfast" cone="elliptic"/>
+
+  <size nkey="2"/>
+
+  <default>
+    <joint armature="0.005" damping="0.05"/>
+    <general forcerange="-5 5" biastype="affine" gainprm="12" biasprm="0 -12 -1"/>
+    <default class="link">
+      <geom size="0.012 0 0" type="capsule"/>
+    </default>
+    <default class="foot">
+      <geom size="0.02 0 0"/>
+    </default>
+    <default class="base">
+      <geom type="box"/>
+    </default>
+    <default class="j0">
+      <joint range="-1.0472 1.0472"/>
+      <general ctrlrange="-1.0472 1.0472"/>
+    </default>
+    <default class="j1">
+      <joint range="-1.74533 1.74533"/>
+      <general ctrlrange="-1.74533 1.74533"/>
+    </default>
+    <default class="j2">
+      <joint range="-2.79253 2.79253"/>
+      <general ctrlrange="-2.79253 2.79253"/>
+    </default>
+  </default>
+
+  <asset>
+    <texture type="2d" colorspace="auto" name="grid" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2" width="512" height="512"/>
+    <material name="grid" texture="grid" texrepeat="10 10"/>
+  </asset>
+
+  <worldbody>
+    <geom name="floor" size="0 0 0.05" type="plane" friction="0.5" material="grid"/>
+    <light pos="0 0 2" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <body name="base" pos="0 0 0.16">
+      <joint name="root" type="free" armature="0" damping="0"/>
+      <geom name="base" class="base" size="0.0707107 0.0707107 0.03" pos="0 -3.72529e-09 0" mass="1.8" rgba="0.9 0.9 0.9 1"/>
+      <geom name="body_nose" size="0.0166667 0.0166667 0.0166667" pos="0.059044 -3.72529e-09 0.0183333" type="box" contype="0" conaffinity="0" mass="0" rgba="0.05 0.05 0.05 1"/>
+      <body name="leg0_0" pos="0.0707107 0.0707107 0" quat="0.92388 0 0 0.382683">
+        <joint name="leg0_j0" class="j0" pos="0 0 0" axis="0 0 1"/>
+        <geom class="link" size="0.012 0.025" pos="0.025 0 0" quat="0.707107 0 -0.707107 0" mass="0.04" rgba="0.42 0.42 0.42 1"/>
+        <body name="leg0_1" pos="0.05 0 0">
+          <joint name="leg0_j1" class="j1" pos="0 0 0" axis="0 1 0"/>
+          <geom class="link" size="0.012 0.075" pos="0.075 0 0" quat="0.707107 0 -0.707107 0" mass="0.08" rgba="0.32 0.32 0.32 1"/>
+          <body name="leg0_2" pos="0.15 0 0">
+            <joint name="leg0_j2" class="j2" pos="0 0 0" axis="0 1 0"/>
+            <geom class="link" size="0.012 0.088" pos="0.088 0 0" quat="0.707107 0 -0.707107 0" mass="0.08" rgba="0.04 0.76 1 1"/>
+            <geom size="0.0048 0.012" pos="0.188 0 0" quat="0.707107 0 -0.707107 0" type="capsule" contype="0" conaffinity="0" mass="0" rgba="0.04 0.76 1 1"/>
+            <body name="foot0" pos="0.2 0 0">
+              <body name="pad0">
+                <joint name="ankle0_a" pos="0 0 0" axis="0 1 0" stiffness="0.05" limited="true" range="-0.785398 0.785398" armature="0.0001" damping="0.005"/>
+                <joint name="ankle0_b" pos="0 0 0" axis="0 0 1" stiffness="0.05" limited="true" range="-0.785398 0.785398" armature="0.0001" damping="0.005"/>
+                <geom size="0.0072" contype="0" conaffinity="0" mass="0" rgba="0.2 0.2 0.2 1"/>
+                <body name="pad0_c0" pos="0.008 -0.0133333 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad0_c1" pos="0.008 -0.0133333 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad0_c2" pos="0.008 -0.0133333 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad0_c3" pos="0.008 0 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad0_c4" pos="0.008 0 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad0_c5" pos="0.008 0 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad0_c6" pos="0.008 0.0133333 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad0_c7" pos="0.008 0.0133333 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad0_c8" pos="0.008 0.0133333 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="leg1_0" pos="-0.0707107 0.0707107 0" quat="0.382683 0 0 0.92388">
+        <joint name="leg1_j0" class="j0" pos="0 0 0" axis="0 0 1"/>
+        <geom class="link" size="0.012 0.025" pos="0.025 0 0" quat="0.707107 0 -0.707107 0" mass="0.04" rgba="0.42 0.42 0.42 1"/>
+        <body name="leg1_1" pos="0.05 0 0">
+          <joint name="leg1_j1" class="j1" pos="0 0 0" axis="0 1 0"/>
+          <geom class="link" size="0.012 0.075" pos="0.075 0 0" quat="0.707107 0 -0.707107 0" mass="0.08" rgba="0.32 0.32 0.32 1"/>
+          <body name="leg1_2" pos="0.15 0 0">
+            <joint name="leg1_j2" class="j2" pos="0 0 0" axis="0 1 0"/>
+            <geom class="link" size="0.012 0.088" pos="0.088 0 0" quat="0.707107 0 -0.707107 0" mass="0.08" rgba="0.04 0.76 1 1"/>
+            <geom size="0.0048 0.012" pos="0.188 0 0" quat="0.707107 0 -0.707107 0" type="capsule" contype="0" conaffinity="0" mass="0" rgba="0.04 0.76 1 1"/>
+            <body name="foot1" pos="0.2 0 0">
+              <body name="pad1">
+                <joint name="ankle1_a" pos="0 0 0" axis="0 1 0" stiffness="0.05" limited="true" range="-0.785398 0.785398" armature="0.0001" damping="0.005"/>
+                <joint name="ankle1_b" pos="0 0 0" axis="0 0 1" stiffness="0.05" limited="true" range="-0.785398 0.785398" armature="0.0001" damping="0.005"/>
+                <geom size="0.0072" contype="0" conaffinity="0" mass="0" rgba="0.2 0.2 0.2 1"/>
+                <body name="pad1_c0" pos="0.008 -0.0133333 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad1_c1" pos="0.008 -0.0133333 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad1_c2" pos="0.008 -0.0133333 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad1_c3" pos="0.008 0 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad1_c4" pos="0.008 0 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad1_c5" pos="0.008 0 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad1_c6" pos="0.008 0.0133333 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad1_c7" pos="0.008 0.0133333 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad1_c8" pos="0.008 0.0133333 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="leg2_0" pos="-0.0707107 -0.0707107 0" quat="0.382683 0 0 -0.92388">
+        <joint name="leg2_j0" class="j0" pos="0 0 0" axis="0 0 1"/>
+        <geom class="link" size="0.012 0.025" pos="0.025 0 0" quat="0.707107 0 -0.707107 0" mass="0.04" rgba="0.42 0.42 0.42 1"/>
+        <body name="leg2_1" pos="0.05 0 0">
+          <joint name="leg2_j1" class="j1" pos="0 0 0" axis="0 1 0"/>
+          <geom class="link" size="0.012 0.075" pos="0.075 0 0" quat="0.707107 0 -0.707107 0" mass="0.08" rgba="0.32 0.32 0.32 1"/>
+          <body name="leg2_2" pos="0.15 0 0">
+            <joint name="leg2_j2" class="j2" pos="0 0 0" axis="0 1 0"/>
+            <geom class="link" size="0.012 0.088" pos="0.088 0 0" quat="0.707107 0 -0.707107 0" mass="0.08" rgba="0.04 0.76 1 1"/>
+            <geom size="0.0048 0.012" pos="0.188 0 0" quat="0.707107 0 -0.707107 0" type="capsule" contype="0" conaffinity="0" mass="0" rgba="0.04 0.76 1 1"/>
+            <body name="foot2" pos="0.2 0 0">
+              <body name="pad2">
+                <joint name="ankle2_a" pos="0 0 0" axis="0 1 0" stiffness="0.05" limited="true" range="-0.785398 0.785398" armature="0.0001" damping="0.005"/>
+                <joint name="ankle2_b" pos="0 0 0" axis="0 0 1" stiffness="0.05" limited="true" range="-0.785398 0.785398" armature="0.0001" damping="0.005"/>
+                <geom size="0.0072" contype="0" conaffinity="0" mass="0" rgba="0.2 0.2 0.2 1"/>
+                <body name="pad2_c0" pos="0.008 -0.0133333 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad2_c1" pos="0.008 -0.0133333 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad2_c2" pos="0.008 -0.0133333 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad2_c3" pos="0.008 0 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad2_c4" pos="0.008 0 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad2_c5" pos="0.008 0 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad2_c6" pos="0.008 0.0133333 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad2_c7" pos="0.008 0.0133333 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad2_c8" pos="0.008 0.0133333 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+      <body name="leg3_0" pos="0.0707107 -0.0707107 0" quat="0.923879 0 0 -0.382684">
+        <joint name="leg3_j0" class="j0" pos="0 0 0" axis="0 0 1"/>
+        <geom class="link" size="0.012 0.025" pos="0.025 0 0" quat="0.707107 0 -0.707107 0" mass="0.04" rgba="0.42 0.42 0.42 1"/>
+        <body name="leg3_1" pos="0.05 0 0">
+          <joint name="leg3_j1" class="j1" pos="0 0 0" axis="0 1 0"/>
+          <geom class="link" size="0.012 0.075" pos="0.075 0 0" quat="0.707107 0 -0.707107 0" mass="0.08" rgba="0.32 0.32 0.32 1"/>
+          <body name="leg3_2" pos="0.15 0 0">
+            <joint name="leg3_j2" class="j2" pos="0 0 0" axis="0 1 0"/>
+            <geom class="link" size="0.012 0.088" pos="0.088 0 0" quat="0.707107 0 -0.707107 0" mass="0.08" rgba="0.04 0.76 1 1"/>
+            <geom size="0.0048 0.012" pos="0.188 0 0" quat="0.707107 0 -0.707107 0" type="capsule" contype="0" conaffinity="0" mass="0" rgba="0.04 0.76 1 1"/>
+            <body name="foot3" pos="0.2 0 0">
+              <body name="pad3">
+                <joint name="ankle3_a" pos="0 0 0" axis="0 1 0" stiffness="0.05" limited="true" range="-0.785398 0.785398" armature="0.0001" damping="0.005"/>
+                <joint name="ankle3_b" pos="0 0 0" axis="0 0 1" stiffness="0.05" limited="true" range="-0.785398 0.785398" armature="0.0001" damping="0.005"/>
+                <geom size="0.0072" contype="0" conaffinity="0" mass="0" rgba="0.2 0.2 0.2 1"/>
+                <body name="pad3_c0" pos="0.008 -0.0133333 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad3_c1" pos="0.008 -0.0133333 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad3_c2" pos="0.008 -0.0133333 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad3_c3" pos="0.008 0 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad3_c4" pos="0.008 0 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad3_c5" pos="0.008 0 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad3_c6" pos="0.008 0.0133333 -0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad3_c7" pos="0.008 0.0133333 0">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+                <body name="pad3_c8" pos="0.008 0.0133333 0.0133333">
+                  <geom size="0.003 0.00666667 0.00666667" type="box" friction="0.5" margin="0.002" gap="0.002" mass="0.00555556" rgba="1 0.26 0.98 1"/>
+                </body>
+              </body>
+            </body>
+          </body>
+        </body>
+      </body>
+    </body>
+  </worldbody>
+
+  <contact>
+    <exclude body1="leg0_2" body2="pad0_c0"/>
+    <exclude body1="leg0_2" body2="pad0_c1"/>
+    <exclude body1="leg0_2" body2="pad0_c2"/>
+    <exclude body1="leg0_2" body2="pad0_c3"/>
+    <exclude body1="leg0_2" body2="pad0_c4"/>
+    <exclude body1="leg0_2" body2="pad0_c5"/>
+    <exclude body1="leg0_2" body2="pad0_c6"/>
+    <exclude body1="leg0_2" body2="pad0_c7"/>
+    <exclude body1="leg0_2" body2="pad0_c8"/>
+    <exclude body1="leg1_2" body2="pad1_c0"/>
+    <exclude body1="leg1_2" body2="pad1_c1"/>
+    <exclude body1="leg1_2" body2="pad1_c2"/>
+    <exclude body1="leg1_2" body2="pad1_c3"/>
+    <exclude body1="leg1_2" body2="pad1_c4"/>
+    <exclude body1="leg1_2" body2="pad1_c5"/>
+    <exclude body1="leg1_2" body2="pad1_c6"/>
+    <exclude body1="leg1_2" body2="pad1_c7"/>
+    <exclude body1="leg1_2" body2="pad1_c8"/>
+    <exclude body1="leg2_2" body2="pad2_c0"/>
+    <exclude body1="leg2_2" body2="pad2_c1"/>
+    <exclude body1="leg2_2" body2="pad2_c2"/>
+    <exclude body1="leg2_2" body2="pad2_c3"/>
+    <exclude body1="leg2_2" body2="pad2_c4"/>
+    <exclude body1="leg2_2" body2="pad2_c5"/>
+    <exclude body1="leg2_2" body2="pad2_c6"/>
+    <exclude body1="leg2_2" body2="pad2_c7"/>
+    <exclude body1="leg2_2" body2="pad2_c8"/>
+    <exclude body1="leg3_2" body2="pad3_c0"/>
+    <exclude body1="leg3_2" body2="pad3_c1"/>
+    <exclude body1="leg3_2" body2="pad3_c2"/>
+    <exclude body1="leg3_2" body2="pad3_c3"/>
+    <exclude body1="leg3_2" body2="pad3_c4"/>
+    <exclude body1="leg3_2" body2="pad3_c5"/>
+    <exclude body1="leg3_2" body2="pad3_c6"/>
+    <exclude body1="leg3_2" body2="pad3_c7"/>
+    <exclude body1="leg3_2" body2="pad3_c8"/>
+  </contact>
+
+  <actuator>
+    <general name="leg0_j0" class="j0" joint="leg0_j0"/>
+    <general name="leg0_j1" class="j1" joint="leg0_j1"/>
+    <general name="leg0_j2" class="j2" joint="leg0_j2"/>
+    <general name="leg1_j0" class="j0" joint="leg1_j0"/>
+    <general name="leg1_j1" class="j1" joint="leg1_j1"/>
+    <general name="leg1_j2" class="j2" joint="leg1_j2"/>
+    <general name="leg2_j0" class="j0" joint="leg2_j0"/>
+    <general name="leg2_j1" class="j1" joint="leg2_j1"/>
+    <general name="leg2_j2" class="j2" joint="leg2_j2"/>
+    <general name="leg3_j0" class="j0" joint="leg3_j0"/>
+    <general name="leg3_j1" class="j1" joint="leg3_j1"/>
+    <general name="leg3_j2" class="j2" joint="leg3_j2"/>
+    <general name="adhere0_0" body="pad0_c0" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere0_1" body="pad0_c1" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere0_2" body="pad0_c2" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere0_3" body="pad0_c3" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere0_4" body="pad0_c4" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere0_5" body="pad0_c5" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere0_6" body="pad0_c6" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere0_7" body="pad0_c7" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere0_8" body="pad0_c8" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_0" body="pad1_c0" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_1" body="pad1_c1" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_2" body="pad1_c2" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_3" body="pad1_c3" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_4" body="pad1_c4" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_5" body="pad1_c5" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_6" body="pad1_c6" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_7" body="pad1_c7" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere1_8" body="pad1_c8" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_0" body="pad2_c0" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_1" body="pad2_c1" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_2" body="pad2_c2" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_3" body="pad2_c3" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_4" body="pad2_c4" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_5" body="pad2_c5" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_6" body="pad2_c6" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_7" body="pad2_c7" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere2_8" body="pad2_c8" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_0" body="pad3_c0" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_1" body="pad3_c1" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_2" body="pad3_c2" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_3" body="pad3_c3" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_4" body="pad3_c4" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_5" body="pad3_c5" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_6" body="pad3_c6" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_7" body="pad3_c7" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+    <general name="adhere3_8" body="pad3_c8" ctrllimited="true" ctrlrange="0 1" forcelimited="false" biastype="none" gainprm="3.33333"/>
+  </actuator>
+
+  <keyframe>
+    <key name="rest" qpos="0 0 0.032 1 0 0 0 -4.13921e-08 -1.41467 2.42287 0.562589 0 -2.27657e-07 -1.41467 2.42287 0.562589 0 1.44872e-07 -1.41467 2.42287 0.562589 0 4.76009e-07 -1.41467 2.42287 0.562589 0" ctrl="-4.13921e-08 -1.41467 2.42287 -2.27657e-07 -1.41467 2.42287 1.44872e-07 -1.41467 2.42287 4.76009e-07 -1.41467 2.42287 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"/>
+    <key name="stand" qpos="0 0 0.16 1 0 0 0 -4.13921e-08 -0.344702 1.97141 -0.0559112 0 -2.27657e-07 -0.344702 1.97141 -0.0559112 0 1.44872e-07 -0.344702 1.97141 -0.0559113 0 4.76009e-07 -0.344702 1.97141 -0.055911 0" ctrl="-4.13921e-08 -0.344702 1.97141 -2.27657e-07 -0.344702 1.97141 1.44872e-07 -0.344702 1.97141 4.76009e-07 -0.344702 1.97141 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0"/>
+  </keyframe>
+</mujoco>

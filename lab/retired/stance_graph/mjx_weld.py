@@ -18,7 +18,7 @@ import jax.numpy as jnp
 from mujoco import mjx
 from jaxlie import SE3, SO3
 
-from lab.stance_graph.mjx_stance import MODEL, load_model, to_qpos
+from lab.retired.stance_graph.mjx_stance import MODEL, load_model, to_qpos
 
 
 def weld_in_place(mjx_model, foot_ids, qpos, stances, n_steps=200):

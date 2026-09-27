@@ -34,7 +34,7 @@ Contrast also ``metrics.py``, which argues for point-cloud RMSD over any
 joint-space metric; the ``max_m ||dp_m||`` variant noted there is the task-space
 sibling of this one. This file is the deliberately-simple L-infinity baseline.
 
-Run:  uv run --extra mjx python lab/posture_graph/chebyshev.py [N_SAMPLES]
+Run:  uv run --extra mjx python lab/retired/posture_graph/chebyshev.py [N_SAMPLES]
 """
 
 import sys

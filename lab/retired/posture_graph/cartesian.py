@@ -45,7 +45,7 @@ not the shortest; it is a cheap upper bound on the strong optimum.
 factor -- the swing leg's mass moves the CoM, so stability depends on ``b`` and
 ``f`` jointly -- which punctures the product with holes. See its docstring.
 
-Run:  uv run --extra mjx python lab/posture_graph/cartesian.py
+Run:  uv run --extra mjx python lab/retired/posture_graph/cartesian.py
 """
 
 import heapq

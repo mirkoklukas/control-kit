@@ -72,6 +72,33 @@ class Leg:
         )
         return jnp.linalg.norm(seg, axis=-1)
 
+    def boxes(self, theta: jax.Array, *, radius: float = 0.015):
+        """Oriented boxes for the leg's links, in the leg's base frame.
+
+        One box per link: centred on the link, local x along it (length
+        ``lengths[k]``), square ``radius`` x ``radius`` cross-section. It reads the
+        link direction off each joint frame's x-axis, so like :attr:`lengths` it
+        assumes colinear ``+x`` links (every leg type built with
+        :func:`.chain.x_offsets`).
+
+        Feed the result to :func:`..collision.overlap` for box-vs-box tests.
+
+        Args:
+            theta: (n,) joint angles.
+            radius: half-thickness of the links.
+
+        Returns:
+            :class:`..collision.OBB` of ``n`` boxes.
+        """
+        from controlkit.kinematics import collision
+        starts = self.forward(theta)[: self.num_joints]        # link starts (frames 0..n-1)
+        rot = starts.rotation().as_matrix()                    # (n, 3, 3)
+        length = self.lengths
+        center = starts.translation() + 0.5 * length[:, None] * rot[..., 0]   # +x axis
+        r = jnp.broadcast_to(radius, (self.num_joints,))
+        half = jnp.stack([0.5 * length, r, r], axis=-1)
+        return collision.OBB(center, half, rot)
+
     def forward(self, theta: jax.Array) -> SE3:
         """Frames of every joint and the foot, in the leg's base frame.
 

@@ -11,6 +11,7 @@ The main goal is locomotion for a hexapod robot platform.
 - Make sure not to delete non-tracked files (git) without explicitly cross-checking with me.
 - Do not edit any files if it is not clear that you should, especially when we are brainstorming about a solution.
 - Plan and think first before writing code.
+- When interacting with the user avoid pasting too much content at once, give the user the ability to assess and ask questions. 
 
 ## How to work with notes
 - Notes are **living documents**. Don't pre-fill or over-structure them.

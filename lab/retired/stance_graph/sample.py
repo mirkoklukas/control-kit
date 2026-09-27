@@ -12,7 +12,7 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from lab.stance_graph.kinematics import from_te, complement
+from lab.retired.stance_graph.kinematics import from_te, complement
 
 
 # Default half-widths of the uniform proposal box around the base body pose,

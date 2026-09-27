@@ -12,8 +12,8 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from lab.gait_graph.kinematics import from_te
-from lab.gait_graph.stance import complement
+from lab.retired.gait_graph.kinematics import from_te
+from lab.retired.gait_graph.stance import complement
 
 
 # Default half-widths of the uniform proposal box around the base body pose,

@@ -33,7 +33,7 @@ correct -- it just expands more).
 factor -- the swing leg's mass moves the CoM, so stability depends on ``b`` and
 ``f`` jointly -- which punctures the product with holes. See its docstring.
 
-Run:  uv run --extra mjx python lab/posture_graph/product.py
+Run:  uv run --extra mjx python lab/retired/posture_graph/product.py
 """
 
 import heapq

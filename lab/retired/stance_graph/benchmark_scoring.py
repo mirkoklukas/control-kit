@@ -10,7 +10,7 @@ The posture pipeline and the timing loop are shared with ``benchmark.py``
 (``sample_postures`` / ``sweep_scoring``); only the experiment wiring differs.
 
 Run (on the A100):
-    uv run --extra mjx python -m lab.stance_graph.benchmark_scoring \
+    uv run --extra mjx python -m lab.retired.stance_graph.benchmark_scoring \
         batch_sizes='[256,1024,4096,16384,65536]' n_stances=8000 --tag=a100
 """
 from dataclasses import dataclass
@@ -21,8 +21,8 @@ import jax.numpy as jnp
 
 from runkit import experiment, RunContext, main
 
-from lab.stance_graph.mjx_stance import MODEL, load_model, to_qpos, stance_forces_batch
-from lab.stance_graph.benchmark import sample_postures, sweep_scoring, summary_header, _append
+from lab.retired.stance_graph.mjx_stance import MODEL, load_model, to_qpos, stance_forces_batch
+from lab.retired.stance_graph.benchmark import sample_postures, sweep_scoring, summary_header, _append
 
 
 @dataclass

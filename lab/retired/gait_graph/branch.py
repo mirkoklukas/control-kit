@@ -27,9 +27,9 @@ from __future__ import annotations
 import jax
 import jax.numpy as jnp
 
-from lab.gait_graph.sample import body_sampler, foot_sampler
-from lab.gait_graph.stance import Posture, Stance, infer_posture, transition_stability
-from lab.gait_graph.task import Task, body_neutral_score, task_scorer
+from lab.retired.gait_graph.sample import body_sampler, foot_sampler
+from lab.retired.gait_graph.stance import Posture, Stance, infer_posture, transition_stability
+from lab.retired.gait_graph.task import Task, body_neutral_score, task_scorer
 
 ALL_IDS = jnp.arange(6)
 

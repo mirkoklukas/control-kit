@@ -30,19 +30,19 @@ tracks what is wired into `compute_reward` today vs. still pending.
 
 ## Terms
 
-| Term | Kind | Formula | Default w | Status |
-|---|---|---|---|---|
-| `tracking_lin_vel` | reward | `exp(-‖v_xy_cmd − v_xy‖² / 0.25)` | `1.0` | ✅ slice 1 |
-| `tracking_ang_vel` | reward | `exp(-(yaw_cmd − yaw_rate)² / 0.25)` | `0.5` | ✅ slice 1 |
-| `base_height` | reward | `exp(-(z − z_target)² / 0.0025)`, `z_target` = model home height (off if `None`) | `1.0` | ✅ |
-| `lin_vel_z` | penalty | `v_z²` (base frame) | `-2.0` | ✅ slice 1 |
-| `ang_vel_xy` | penalty | `roll_rate² + pitch_rate²` | `-0.05` | ✅ slice 1 |
-| `orientation` | penalty | `‖projected_gravity_xy‖²` | `-0.2` | ✅ slice 1 |
-| `action_rate` | penalty | `Σ(aₜ − aₜ₋₁)²` | `-0.01` | ✅ slice 1 |
-| `torques` | penalty | `Σ τ²` over leg dofs (`qfrc_actuator`) | `-1e-4` | ✅ slice 2 |
-| `dof_acc` | penalty | `Σ q̈²` over leg dofs (`qacc`) | `-2.5e-7` | ✅ slice 2 |
-| `collision` | penalty | count of bad-geom contacts (normal force > thresh) | `-1.0` | ✅ slice 3 |
-| `feet_air_time` | gait | `Σ_feet (air_at_landing − target) · first_contact` | `1.0` | ✅ slice 3 |
+| Term               | Kind    | Formula                                                                          | Default w | Status    |
+| ------------------ | ------- | -------------------------------------------------------------------------------- | --------- | --------- |
+| `tracking_lin_vel` | reward  | `exp(-‖v_xy_cmd − v_xy‖² / 0.25)`                                                | `1.0`     | ✅ slice 1 |
+| `tracking_ang_vel` | reward  | `exp(-(yaw_cmd − yaw_rate)² / 0.25)`                                             | `0.5`     | ✅ slice 1 |
+| `base_height`      | reward  | `exp(-(z − z_target)² / 0.0025)`, `z_target` = model home height (off if `None`) | `1.0`     | ✅         |
+| `lin_vel_z`        | penalty | `v_z²` (base frame)                                                              | `-2.0`    | ✅ slice 1 |
+| `ang_vel_xy`       | penalty | `roll_rate² + pitch_rate²`                                                       | `-0.05`   | ✅ slice 1 |
+| `orientation`      | penalty | `‖projected_gravity_xy‖²`                                                        | `-0.2`    | ✅ slice 1 |
+| `action_rate`      | penalty | `Σ(aₜ − aₜ₋₁)²`                                                                  | `-0.01`   | ✅ slice 1 |
+| `torques`          | penalty | `Σ τ²` over leg dofs (`qfrc_actuator`)                                           | `-1e-4`   | ✅ slice 2 |
+| `dof_acc`          | penalty | `Σ q̈²` over leg dofs (`qacc`)                                                   | `-2.5e-7` | ✅ slice 2 |
+| `collision`        | penalty | count of bad-geom contacts (normal force > thresh)                               | `-1.0`    | ✅ slice 3 |
+| `feet_air_time`    | gait    | `Σ_feet (air_at_landing − target) · first_contact`                               | `1.0`     | ✅ slice 3 |
 
 `feet_air_time` is paid **only on the touchdown step** (the `first_contact` mask),
 rewarding longer swing phases up to `air_time_target` (default `0.4 s`). It is
