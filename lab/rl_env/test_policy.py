@@ -214,8 +214,11 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                   + " ".join(f"{row[f'reward/{k}']:6.3f}" for k in TERMS), flush=True)
             self._reset_acc()
             self.k_c = self.k_c ** cfg.env.kc_rate             # curriculum
-            self.training_env.set_attr("k_c", self.k_c)
-            self.training_env.set_attr("k_support", self._k_support())
+            # set_wrapper_attr, not set_attr: SB3's set_attr sets the attribute on the
+            # outermost wrapper (Monitor), so WalkEnv would never see it (until
+            # 2026-09-27 every run trained with k_c = kc0 and k_support = 0 for that reason)
+            self.training_env.env_method("set_wrapper_attr", "k_c", self.k_c)
+            self.training_env.env_method("set_wrapper_attr", "k_support", self._k_support())
             # CHECKPOINT SCHEDULE (1/2): every 20 PPO iterations (20 x n_envs x N_STEPS
             # = ~245k env steps with 12 envs); (2/2) at the end, in _on_training_end
             if self.it % 20 == 0:

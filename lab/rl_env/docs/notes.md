@@ -251,6 +251,14 @@ Rotate gravity instead of the ground; real wall geometry only for transitions.
     n_planted)` (one foot short costs 1, two cost 2) and its own factor `k_support`:
     0 for `support_start` = 1M steps, then linear to 1 over `support_ramp` = 2M. Not
     scaled by `k_c` anymore. Progress lines show `k_sup`.
+  - Curriculum never reached the envs (fixed 2026-09-27): the callback pushed `k_c` /
+    `k_support` with `venv.set_attr`, which sets the attribute on the outer `Monitor`
+    wrapper only. So all runs before the fix trained with a constant `k_c = kc0` (0.4;
+    the rising k_c in the progress lines was the callback's own counter) and, since the
+    support ramp, `k_support = 0` (support cost off). Now
+    `env_method("set_wrapper_attr", ...)`, verified on the training stack (torque term
+    x2.5 for k_c 0.4 -> 1.0). Old runs' results should be read with this in mind.
+    Proposal for a general mechanism: `ramps-proposal.md`.
   - Why `gymnasium.Env` and not a Brax env (2026-09-25): SB3 needs the Gymnasium API,
     and a stateful numpy/MuJoCo-C env is quick to write and debug on the Mac (contact
     loop, `mj_contactForce`, `mj_objectVelocity`, contact history). A Brax env is pure
