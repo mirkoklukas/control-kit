@@ -218,8 +218,7 @@ Rotate gravity instead of the ground; real wall geometry only for transitions.
     (planted = force > 1 N). New terms: air time per touchdown (`w_air` 10, target
     0.25 s, capped 0.5 s) and minimum support (>= 3 feet planted, `w_support` 5), both
     curriculum-scaled. Progress lines show `duty` (planted fraction) and `air_s` (mean
-    air time per step). `eval` saves the forces; `ctk play` draws them as a live plot
-    (npz `plot`, bottom left, last 2 s).
+    air time per step). `eval` saves the forces (`force` in the npz; the live plot in `ctk play` was dropped 2026-09-27).
   - Pitfalls found: air term without the dt factor was 20x the whole tracking reward
     (exploration makes feet chatter: ~0.04 s air per touchdown); with gait terms the
     early-episode costs (~-52 unscaled) exceeded `w_term` 20 -> gait terms now
@@ -245,6 +244,13 @@ Rotate gravity instead of the ground; real wall geometry only for transitions.
     of loaded feet, median 0.11 m/s. That is the slip term (`w_slip` 2, paper value;
     doc suggests 10), not drag -> raising `w_drag` would not change it. -> `w_slip`
     raised to 5.
+  - Support: graded + ramped (2026-09-27). `w_support` 10 / 20 made the policy stop
+    stepping (duty 0.92, vx ~0.01 at 0.7M steps): walking policies at `w_support` 5
+    had < 3 planted feet ~half the time (duty ~0.6, trot-like), so a strong 0/1 penalty
+    cost more than walking earns (+0.022/step at best). Now `C_support = max(0, 3 -
+    n_planted)` (one foot short costs 1, two cost 2) and its own factor `k_support`:
+    0 for `support_start` = 1M steps, then linear to 1 over `support_ramp` = 2M. Not
+    scaled by `k_c` anymore. Progress lines show `k_sup`.
   - Why `gymnasium.Env` and not a Brax env (2026-09-25): SB3 needs the Gymnasium API,
     and a stateful numpy/MuJoCo-C env is quick to write and debug on the Mac (contact
     loop, `mj_contactForce`, `mj_objectVelocity`, contact history). A Brax env is pure

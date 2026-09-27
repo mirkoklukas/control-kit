@@ -166,8 +166,15 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
             print(f"{n_envs} envs x {model.n_steps} "
                   f"steps/iter | policy dt {venv.get_attr('dt')[0]:.3f}s", flush=True)
             print(f"{'it':>4} {'steps':>9} {'fps':>6} {'return':>7} {'len':>5} {'vx':>6} "
-                  f"{'duty':>5} {'air_s':>5} {'k_c':>5}  "
+                  f"{'duty':>5} {'air_s':>5} {'k_c':>5} {'k_sup':>5}  "
                   + " ".join(f"{k[:6]:>6}" for k in TERMS), flush=True)
+
+        def _k_support(self):
+            """Support ramp: 0 until support_start training steps, then linear to 1 over
+            support_ramp steps."""
+            e = cfg.env
+            return float(np.clip((self.num_timesteps - e.support_start) / max(e.support_ramp, 1),
+                                 0.0, 1.0))
 
         def _reset_acc(self):
             self.acc = {k: 0.0 for k in TERMS}
@@ -193,7 +200,8 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                    "ep_len": float(np.mean(el)) if el else 0.0,
                    "vx": self.vx / max(self.n, 1), "duty": self.planted / max(self.n, 1),
                    "air_s": float(np.mean(self.air)) if self.air else 0.0,
-                   "k_c": self.k_c, "cmd_vx": cfg.env.cmd_vx, "air_target": cfg.env.air_target}
+                   "k_c": self.k_c, "k_support": self._k_support(),
+                   "cmd_vx": cfg.env.cmd_vx, "air_target": cfg.env.air_target}
             # reward terms under "reward/<term>" (mean per policy step, times dt)
             row.update({f"reward/{k}": v / max(self.n, 1) for k, v in self.acc.items()})
             ctx.record(**row)                  # metrics/run.jsonl
@@ -202,11 +210,12 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
             self.last = row
             print(f"{row['it']:4d} {row['steps']:9d} {row['fps']:6d} {row['ep_return']:7.2f} "
                   f"{row['ep_len']:5.0f} {row['vx']:6.3f} {row['duty']:5.2f} {row['air_s']:5.2f} "
-                  f"{row['k_c']:5.2f}  "
+                  f"{row['k_c']:5.2f} {row['k_support']:5.2f}  "
                   + " ".join(f"{row[f'reward/{k}']:6.3f}" for k in TERMS), flush=True)
             self._reset_acc()
             self.k_c = self.k_c ** cfg.env.kc_rate             # curriculum
             self.training_env.set_attr("k_c", self.k_c)
+            self.training_env.set_attr("k_support", self._k_support())
             # CHECKPOINT SCHEDULE (1/2): every 20 PPO iterations (20 x n_envs x N_STEPS
             # = ~245k env steps with 12 envs); (2/2) at the end, in _on_training_end
             if self.it % 20 == 0:
@@ -272,7 +281,7 @@ def evaluate(cfg: PolicyCfg, ctx: RunContext) -> dict:
     venv.training, venv.norm_reward = False, False
     model = PPO.load(ckpt.dir / "model.zip", device="cpu")
     env = venv.venv.envs[0]
-    env.k_c = 1.0
+    env.k_c, env.k_support = 1.0, 1.0           # full costs
     obs = venv.reset()
     log = {k: [] for k in ("qpos", "qvel", "ctrl", "force")}
     ret, vx = 0.0, []
@@ -310,9 +319,7 @@ def evaluate(cfg: PolicyCfg, ctx: RunContext) -> dict:
     spec, _ = build(cfg.model, write=False)
     xml.write_text(spec.to_xml())
     np.savez(eval_dir / "rollout.npz", **{k: np.asarray(v) for k, v in log.items()},
-             timestep=env.dt, model=_rel(xml),
-             plot=F, plot_labels=np.array([f"foot{i}" for i in range(4)]),
-             plot_title="foot normal force (N)")
+             timestep=env.dt, model=_rel(xml))
     print(f"saved {_rel(eval_dir)}/eval.yaml, rollout.npz (+ .xml)")
     return summary
 

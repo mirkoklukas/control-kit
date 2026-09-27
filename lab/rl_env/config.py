@@ -113,9 +113,9 @@ class WalkEnvCfg:
     w_ankle: float = 5.0            # C_ankle sum_contact max(0, |q| - q_safe)^2
     w_air: float = 20.0             # R_air: per touchdown, (min(t_air, air_max) - air_target);
                                     # times dt like all terms; curriculum-scaled
-    w_support: float = 5.0          # C_support: cost while fewer than min_support feet are
-                                    # planted (doc: 20, unscaled, on the wall; on the floor
-                                    # gait shaping -> smaller, curriculum-scaled)
+    w_support: float = 5.0          # C_support: per foot short of min_support planted feet
+                                    # (graded). Not scaled by k_c but by its own ramp, see
+                                    # support_start / support_ramp (doc: 20, on the wall)
     w_term: float = 50.0            # termination cost (trunk contact / tipped over). The
                                     # paper's 1 would make sitting down (ending the episode)
                                     # cheaper than an episode of early exploration costs
@@ -143,6 +143,10 @@ class WalkEnvCfg:
     # --- curriculum ---
     kc0: float = 0.4                # curriculum start; k_c <- k_c ** kc_rate per PPO iteration
     kc_rate: float = 0.997
+    # support is ramped in separately (k_support): off until the policy walks, then up to
+    # full strength. Too strong too early and not stepping at all is the cheapest option.
+    support_start: int = 1_000_000  # training steps before the support cost starts
+    support_ramp: int = 2_000_000   # then rises linearly from 0 to 1 over this many steps
 
 
 def parse_overrides(cls, argv: list[str], extra: dict) -> tuple[object, dict]:

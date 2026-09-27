@@ -175,16 +175,21 @@ def ankle_range(q_ankle, planted, q_safe):
 
 # ------------------------------------------------------------------ gait
 def min_support(planted, n_min):
-    """``C_support = [n_planted < n_min]``: too few feet on the ground.
+    """``C_support = max(0, n_min - n_planted)``: how many feet short of the minimum.
+
+    Graded, not 0/1: one foot short costs 1, two cost 2. A 0/1 penalty treats a
+    near-crawl (occasionally one foot short) like a trot (often two short), which
+    gives no gradient towards the crawl and, weighted strongly, makes not stepping at
+    all the cheapest option.
 
     Args:
-        planted: (4,) bool, foot in contact.
+        planted: (4,) bool, foot planted.
         n_min: minimum number of planted feet (3 = crawl, at most one foot in the air).
 
     Returns:
-        1.0 if violated, else 0.0.
+        The shortfall, >= 0.
     """
-    return (np.sum(planted) < n_min).astype(float)
+    return np.maximum(0.0, n_min - np.sum(planted)).astype(float)
 
 
 def air_time(touchdown, air_at_touchdown, target, t_max):

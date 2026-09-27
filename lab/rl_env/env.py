@@ -29,8 +29,11 @@ regularization costs are also scaled by the curriculum factor ``k_c`` (``kc0`` -
                + w_clear sum_air (h_hat - h_i)^2 |v_t,i|
                + w_drag sum_{touching, not planted} |v_t,i|
                + w_slip sum_planted (|v_t,i| + r_pad |w_n,i|)
-               + w_ankle sum_contact sum_ab max(0, |q| - q_safe)^2
-               + w_support [n_planted < min_support])
+               + w_ankle sum_planted sum_ab max(0, |q| - q_safe)^2)
+        - k_support w_support max(0, min_support - n_planted)
+
+``k_support`` ramps the support cost in: 0 for the first ``support_start`` training
+steps, then linear to 1 over ``support_ramp`` steps (set by the training loop).
     K(x) = 4 / (e^x + 2 + e^-x)   (1 at x = 0)
 
 Contact history: the env keeps the last ``contact_history`` policy steps of each
@@ -69,7 +72,9 @@ TERMS = ("lin", "yaw", "air", "torque", "action_rate", "joint_speed", "orient", 
 # rewards and the termination cost. The gait terms (air, support) are included: on
 # the floor they shape the gait; they are not about safety.
 REG = ("torque", "action_rate", "joint_speed", "orient", "height", "clear", "drag", "slip", "ankle",
-       "air", "support")
+       "air")
+# `support` has its own factor, k_support (0 -> 1 on a schedule of training steps,
+# support_start / support_ramp), instead of k_c.
 
 
 class WalkEnv(gym.Env):
@@ -77,7 +82,7 @@ class WalkEnv(gym.Env):
 
     One instance = one simulated robot. ``test_policy`` runs several in parallel
     (one per subprocess) and updates the curriculum factor ``k_c`` from outside
-    (``VecEnv.set_attr("k_c", ...)``).
+    (``VecEnv.set_attr("k_c", ...)``), and the support ramp ``k_support`` the same way.
 
     Args:
         mcfg: the robot model (:class:`.config.ModelCfg`).
@@ -99,6 +104,7 @@ class WalkEnv(gym.Env):
         self.dt = self.n_sub * m.opt.timestep            # policy step (s)
         self.max_steps = int(cfg.episode_s / self.dt)    # episode length (policy steps)
         self.k_c = cfg.kc0                               # curriculum factor, set from outside
+        self.k_support = 0.0                             # support ramp (0..1), set from outside
 
         # --- the `stand` pose: reset state and the action's zero point ---
         key = m.key("stand")
@@ -359,9 +365,9 @@ class WalkEnv(gym.Env):
             "drag": -cfg.w_drag * rw.foot_drag(v_t, touching, feet),
             "slip": -cfg.w_slip * rw.foot_slip(v_t, w_n, feet, self.r_pad),
             "ankle": -cfg.w_ankle * rw.ankle_range(q_ankle, feet, self.q_safe),
-            # gait: at least min_support feet planted; air time per touchdown (can be
-            # negative: a step shorter than air_target costs)
-            "support": -cfg.w_support * rw.min_support(feet, cfg.min_support),
+            # gait: feet short of min_support planted (graded, ramped in by k_support); air
+            # time per touchdown (can be negative: a step shorter than air_target costs)
+            "support": -cfg.w_support * self.k_support * rw.min_support(feet, cfg.min_support),
             "air": cfg.w_air * rw.air_time(touchdown, air_td, cfg.air_target, cfg.air_max),
         }
         for k in REG:                          # curriculum: scale the shaping terms
