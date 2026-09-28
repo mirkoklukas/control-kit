@@ -1,0 +1,152 @@
+# Crawl gait (one leg at a time): the full test_policy config.
+#   runkit run lab.rl_env.test_policy exp:configs/crawl.yaml --tag=crawl
+# No seed: a fresh one is drawn per run (add `seed: N` to repeat a run).
+# A full copy: later changes to the defaults in code do not reach this file.
+model:
+  num_legs: 4
+  mount_radius: 0.1
+  leg_lengths:
+  - 0.05
+  - 0.15
+  - 0.2
+  joint_limits_deg:
+  - - -60
+    - 60
+  - - -100
+    - 100
+  - - -160
+    - 160
+  body_half_height: 0.03
+  link_radius: 0.012
+  nose_offset: 0.005
+  mass_body: 1.8
+  mass_links:
+  - 0.04
+  - 0.08
+  - 0.08
+  mass_pad: 0.05
+  pad_size: 0.04
+  pad_cells: 1
+  pad_thickness: 0.006
+  pivot_height: 0.005
+  ankle_range_deg: 45.0
+  ankle_stiffness: 0.05
+  ankle_damping: 0.005
+  ankle_armature: 0.0001
+  pad_friction: 0.5
+  adhesion_gain: 30.0
+  adhesion_margin: 0.002
+  kp: 10.0
+  kv: 1.0
+  forcerange:
+  - -5.0
+  - 5.0
+  joint_damping: 0.05
+  armature: 0.005
+  timestep: 0.002
+  integrator: implicitfast
+  stand_foot_radius: 0.28
+  stand_height: 0.16
+  rest_clearance: 0.002
+env:
+  cmd_vx: 0.1
+  policy_hz: 50.0
+  episode_s: 10.0
+  action_scale: 0.3
+  reset_noise: 0.05
+  w_lin: 5.0
+  lin_sharpness: 40.0
+  w_yaw: 3.0
+  yaw_sharpness: 1.0
+  w_torque: 0.005
+  w_action_rate: 0.5
+  w_joint_speed: 0.03
+  w_orient: 0.4
+  w_height: 50.0
+  w_clear: 100.0
+  w_slip: 5.0
+  w_drag: 2.0
+  w_ankle: 5.0
+  w_air: 20.0
+  w_support: 2.0
+  w_term: 50.0
+  clear_height: 0.06
+  ankle_safe_deg: 30.0
+  air_target: 0.25
+  air_max: 0.3
+  min_support: 3
+  contact_force_min: 1.0
+  contact_touch_min: 0.05
+  pad_tilt_max_deg: 3.0
+  contact_history: 100
+  tip_deg: 60.0
+steps: 10000000
+n_envs: 12
+_schedule:
+  enabled: true
+  env:
+    w_torque:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_action_rate:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_joint_speed:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_orient:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_height:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_clear:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_drag:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_slip:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_ankle:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_air:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_support:
+      op: scale
+      kind: linear
+      start: 500000
+      length: 2000000

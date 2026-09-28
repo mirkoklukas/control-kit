@@ -28,8 +28,12 @@ plus what runkit writes when asked, plus this experiment's own files under ``out
       model.zip, vecnormalize.pkl         the previous one (runkit's ctx.checkpoint;
                                           without a name: numbered ones); checkpoint.yaml
                                           info: it, steps, ep_return, vx
-    metrics/run.jsonl                     one row per PPO iteration (ctx.record)
+    metrics/run.jsonl                     one row per PPO iteration: the values to watch
+                                          (it, steps, fps, ep_return, ep_len, vx, duty, air_s)
+    metrics/reward.jsonl                  the reward terms, one row per PPO iteration
     metrics/eval.jsonl                    one row per eval (ctx.record("eval", ...))
+    metrics/schedule.jsonl                the scheduled env values pushed to the envs, one
+                                          row at the start and one per PPO iteration
     out/progress.png                      training curve, from metrics/run.jsonl
     out/eval/eval.yaml                    latest eval summary
     out/eval/rollout.npz, rollout.xml     its replay
@@ -45,10 +49,10 @@ env.w_air=15 model.kp=12``. ``run`` takes ``key=value`` overrides and
 Environment, observation, action and reward: :mod:`.env` (:class:`WalkEnv`).
 
 Progress: one line per PPO iteration in the terminal (steps, fps, episode return
-and length, forward speed, the schedule factors of the shaping costs (``k_c``) and the
-support cost (``k_sup``), and the per-term reward breakdown); the same rows go to
-``metrics/run.jsonl`` (all schedule factors as ``schedule/<path>``), plotted to
-``out/progress.png`` at every checkpoint.
+and length, forward speed, duty, air time and the per-term reward breakdown); the same
+run values go to ``metrics/run.jsonl`` and the reward terms to ``metrics/reward.jsonl``,
+plotted to ``out/progress.png`` at every checkpoint. The
+scheduled values pushed to the envs go to ``metrics/schedule.jsonl``.
 
 Reward schedule: ``PolicyCfg._schedule`` (see :mod:`.scheduled_config`). Once per PPO
 iteration the progress callback evaluates it at the current step and pushes the
@@ -57,6 +61,7 @@ the full-strength ``env`` config.
 """
 
 import dataclasses
+import functools
 import sys
 import time
 from pathlib import Path
@@ -68,8 +73,7 @@ from runkit import Experiment, RunContext, load_metrics, random_seed
 from .config import ModelCfg, WalkEnvCfg
 from .env import TERMS, WalkEnv
 from .model import build
-from .scheduled_config import (ScheduledConfig, geometric, linear, merge_with_default,
-                               scale, schedule)
+from .scheduled_config import ScheduledConfig, geometric, linear, scale, schedule
 
 REPO = Path(__file__).resolve().parents[2]
 N_STEPS = 1024      # PPO rollout length per env and iteration
@@ -79,9 +83,9 @@ N_STEPS = 1024      # PPO rollout length per env and iteration
 # Shaping costs: Hwangbo et al.'s curriculum factor, x0 ** (rate ** i) per PPO
 # iteration i (per = one iteration = 12 envs x 1024 steps).
 SHAPING = scale(geometric(x0=0.4, rate=0.997, per=12 * N_STEPS))
-# Support cost: off until the policy walks, then ramped in (too strong too early and not
-# stepping at all is the cheapest option).
-SUPPORT = scale(linear(start=1_000_000, length=2_000_000))
+# Support cost: off until the policy walks, then ramped in slowly (too strong too early
+# and not stepping at all is the cheapest option).
+SUPPORT = scale(linear(start=500_000, length=2_000_000))
 
 
 @dataclasses.dataclass
@@ -109,11 +113,8 @@ class PolicyCfg:
         "env.w_air": SHAPING,
         "env.w_support": SUPPORT,
     })
-
-    def __post_init__(self):
-        # runkit replaces a dict field on override instead of merging into its default;
-        # merge here, so `_schedule.env.w_support.start=2e6` changes just that leaf
-        self._schedule = merge_with_default(self)
+    # `_schedule.env.w_support.start=2e6` changes just that leaf: runkit merges an
+    # override of a dict field into its default
 
 
 # ---------------------------------------------------------------------- training
@@ -126,8 +127,12 @@ def make_env(cfg: PolicyCfg, rank: int, step: int = 0):
     return _f
 
 
-def _plot(rows: list[dict], png_path: Path) -> None:
-    """The training curve from the per-iteration metric rows (``metrics/run.jsonl``)."""
+def _plot(rows: list[dict], png_path: Path, *, reward_rows: list[dict] = (),
+          cmd_vx: float | None = None, air_target: float | None = None) -> None:
+    """The training curve from the per-iteration metric rows (``metrics/run.jsonl``),
+    the reward terms from ``metrics/reward.jsonl`` (``reward_rows``), and the commanded
+    speed / air-time target as reference lines. Older runs kept the terms (``reward/<k>``
+    or plain ``<k>``) and the references (``cmd_vx``, ``air_target``) in their run rows."""
     import matplotlib
     matplotlib.use("Agg")
     import matplotlib.pyplot as plt
@@ -143,19 +148,29 @@ def _plot(rows: list[dict], png_path: Path) -> None:
     ax[0, 0].set(title="episode return", ylabel="summed reward per episode")
     ax[0, 1].plot(x, col("ep_len"))
     ax[0, 1].set(title="episode length", ylabel="policy steps per episode")
-    ax[1, 0].plot(x, col("vx"), label="measured"); ax[1, 0].axhline(float(rows[0]["cmd_vx"]), ls="--", c="k", lw=1, label="commanded")
+    cmd_vx = rows[0].get("cmd_vx") if cmd_vx is None else cmd_vx
+    air_target = rows[0].get("air_target") if air_target is None else air_target
+    ax[1, 0].plot(x, col("vx"), label="measured")
+    if cmd_vx is not None:
+        ax[1, 0].axhline(float(cmd_vx), ls="--", c="k", lw=1, label="commanded")
     ax[1, 0].set(title="forward speed", ylabel="body x velocity (m/s)"); ax[1, 0].legend()
-    for k in TERMS:
-        # "reward/<term>"; plain "<term>" in runs recorded before the rename; terms a
-        # run did not have (e.g. drag in older runs) are skipped
-        key = f"reward/{k}" if f"reward/{k}" in rows[0] else k
-        if key in rows[0]:
-            ax[1, 1].plot(x, col(key), label=k, lw=1)
+    if reward_rows:                              # the reward stream
+        xr = np.array([float(r["steps"]) for r in reward_rows]) / 1e6
+        for k in TERMS:
+            if k in reward_rows[0]:
+                ax[1, 1].plot(xr, [float(r[k]) for r in reward_rows], label=k, lw=1)
+    else:                                        # older runs: the terms in the run rows
+        for k in TERMS:
+            key = f"reward/{k}" if f"reward/{k}" in rows[0] else k
+            if key in rows[0]:
+                ax[1, 1].plot(x, col(key), label=k, lw=1)
     ax[1, 1].set(title="reward terms", ylabel="reward per policy step (mean)"); ax[1, 1].legend(fontsize=7, ncol=2)
     if "duty" in rows[0]:
         ax[2, 0].plot(x, col("duty"))
         ax[2, 0].set(title="duty factor", ylabel="fraction of time a foot is planted")
-        ax[2, 1].plot(x, col("air_s"), label="measured"); ax[2, 1].axhline(float(rows[0]["air_target"]), ls="--", c="k", lw=1, label="target")
+        ax[2, 1].plot(x, col("air_s"), label="measured")
+        if air_target is not None:
+            ax[2, 1].axhline(float(air_target), ls="--", c="k", lw=1, label="target")
         ax[2, 1].set(title="air time per foot step", ylabel="seconds in the air"); ax[2, 1].legend()
     for a in ax.flat:
         if a.has_data():
@@ -190,7 +205,7 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                         norm_obs=True, norm_reward=True, clip_obs=10.0)
     model = PPO(
         "MlpPolicy", venv, n_steps=N_STEPS, batch_size=4096, n_epochs=5, learning_rate=3e-4,
-        gamma=0.99, gae_lambda=0.95, clip_range=0.2, ent_coef=0.0, max_grad_norm=1.0,
+        gamma=0.99, gae_lambda=0.95, clip_range=0.2, ent_coef=0.005, max_grad_norm=1.0,
         policy_kwargs=dict(net_arch=dict(pi=[256, 128], vf=[256, 128]),
                            activation_fn=torch.nn.Tanh, log_std_init=-1.0),
         verbose=0, device="cpu", seed=cfg.seed)
@@ -203,13 +218,25 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
 
         def _on_training_start(self):
             self.t0, self.it = time.time(), 0
-            self.rows = []                     # all metric rows, for the curve
+            self.rows = []                     # all run rows, for the curve
+            self.reward_rows = []              # all reward rows, for the curve
             self._reset_acc()
+            self._push(schedule(0))            # the envs were built with it; recorded
             print(f"{n_envs} envs x {model.n_steps} "
                   f"steps/iter | policy dt {venv.get_attr('dt')[0]:.3f}s", flush=True)
             print(f"{'it':>4} {'steps':>9} {'fps':>6} {'return':>7} {'len':>5} {'vx':>6} "
-                  f"{'duty':>5} {'air_s':>5} {'k_c':>5} {'k_sup':>5}  "
+                  f"{'duty':>5} {'air_s':>5}  "
                   + " ".join(f"{k[:6]:>6}" for k in TERMS), flush=True)
+
+        def _push(self, new_cfg):
+            """Push ``new_cfg.env`` into every env and record its scheduled values in
+            their own stream (the config over training, not a training metric)."""
+            # set_wrapper_attr, not set_attr: SB3's set_attr only sets the attribute on
+            # the outermost wrapper (Monitor), so WalkEnv would never see it
+            self.training_env.env_method("set_wrapper_attr", "cfg", new_cfg.env)
+            ctx.record("schedule", it=self.it, steps=self.num_timesteps,
+                       **{".".join(e.path): functools.reduce(getattr, e.path, new_cfg)
+                          for e in schedule.entries})
 
         def _reset_acc(self):
             self.acc = {k: 0.0 for k in TERMS}
@@ -234,27 +261,22 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                    "ep_return": float(np.mean(ep)) if ep else 0.0,
                    "ep_len": float(np.mean(el)) if el else 0.0,
                    "vx": self.vx / max(self.n, 1), "duty": self.planted / max(self.n, 1),
-                   "air_s": float(np.mean(self.air)) if self.air else 0.0,
-                   "cmd_vx": cfg.env.cmd_vx, "air_target": cfg.env.air_target}
-            # the schedule's factors used in this rollout, under "schedule/<path>"
-            factors = schedule.values(self.num_timesteps - self.model.n_steps * n_envs)
-            row.update({f"schedule/{k}": v for k, v in factors.items()})
-            # reward terms under "reward/<term>" (mean per policy step, times dt)
-            row.update({f"reward/{k}": v / max(self.n, 1) for k, v in self.acc.items()})
+                   "air_s": float(np.mean(self.air)) if self.air else 0.0}
+            # run: the few values to watch training by; the reward terms (mean per
+            # policy step, times dt) go to a stream of their own
+            terms = {k: v / max(self.n, 1) for k, v in self.acc.items()}
             ctx.record(**row)                  # metrics/run.jsonl
+            ctx.record("reward", it=self.it, steps=self.num_timesteps, **terms)
+            self.reward_rows.append({"steps": self.num_timesteps, **terms})
             ctx.progress(self.num_timesteps)   # status.yaml
             self.rows.append(row)
             self.last = row
             print(f"{row['it']:4d} {row['steps']:9d} {row['fps']:6d} {row['ep_return']:7.2f} "
-                  f"{row['ep_len']:5.0f} {row['vx']:6.3f} {row['duty']:5.2f} {row['air_s']:5.2f} "
-                  f"{factors.get('env.w_torque', 1.0):5.2f} {factors.get('env.w_support', 1.0):5.2f}  "
-                  + " ".join(f"{row[f'reward/{k}']:6.3f}" for k in TERMS), flush=True)
+                  f"{row['ep_len']:5.0f} {row['vx']:6.3f} {row['duty']:5.2f} {row['air_s']:5.2f}  "
+                  + " ".join(f"{terms[k]:6.3f}" for k in TERMS), flush=True)
             self._reset_acc()
-            # reward schedule: the env config for the next rollout, pushed into every env.
-            # set_wrapper_attr, not set_attr: SB3's set_attr only sets the attribute on the
-            # outermost wrapper (Monitor), so WalkEnv would never see it
-            env_cfg = schedule(self.num_timesteps).env
-            self.training_env.env_method("set_wrapper_attr", "cfg", env_cfg)
+            # reward schedule: the env config for the next rollout
+            self._push(schedule(self.num_timesteps))
             # CHECKPOINT SCHEDULE (1/2): every 20 PPO iterations (20 x n_envs x N_STEPS
             # = ~245k env steps with 12 envs); (2/2) at the end, in _on_training_end
             if self.it % 20 == 0:
@@ -274,7 +296,8 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                 # the schedule is a function of `steps`: resuming evaluates it there
                 ckpt.info.update(it=self.it, steps=self.num_timesteps,
                                  **{k: last[k] for k in ("ep_return", "vx") if k in last})
-            _plot(self.rows, run_dir / "progress.png")
+            _plot(self.rows, run_dir / "progress.png", reward_rows=self.reward_rows,
+                  cmd_vx=cfg.env.cmd_vx, air_target=cfg.env.air_target)
 
         def _on_training_end(self):
             self._checkpoint()          # CHECKPOINT SCHEDULE (2/2): the final one
@@ -378,12 +401,17 @@ def show(cfg: PolicyCfg, ctx: RunContext) -> None:
     if rows:
         r = rows[-1]
         print(f"progress it {r['it']}, {r['steps'] / 1e6:.2f}M steps: return "
-              f"{r['ep_return']:.2f}, vx {r['vx']:.3f} (cmd {r['cmd_vx']}), "
+              f"{r['ep_return']:.2f}, vx {r['vx']:.3f} (cmd {r.get('cmd_vx', cfg.env.cmd_vx)}), "
               f"duty {r['duty']:.2f}, air {r['air_s']:.2f} s")
-        sched = {k[len("schedule/"):]: v for k, v in r.items() if k.startswith("schedule/")}
+        srows = load_metrics(d, "schedule")               # older runs: schedule/<path> in run
+        sched = ({k: v for k, v in srows[-1].items() if not k.startswith("_")
+                  and k not in ("it", "steps")} if srows else
+                 {k[len("schedule/"):]: v for k, v in r.items() if k.startswith("schedule/")})
         if sched:
             print("schedule " + ", ".join(f"{k} {v:.2f}" for k, v in sched.items()))
-        _plot(rows, out / "progress.png")          # needs >= 2 rows
+        _plot(rows, out / "progress.png", reward_rows=load_metrics(d, "reward"),
+              cmd_vx=rows[0].get("cmd_vx", cfg.env.cmd_vx),
+              air_target=rows[0].get("air_target", cfg.env.air_target))   # needs >= 2 rows
         if (out / "progress.png").exists():
             print(f"curve    {_rel(out / 'progress.png')}")
     else:

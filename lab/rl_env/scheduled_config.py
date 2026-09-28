@@ -132,18 +132,6 @@ def schedule(spec: dict, *, enabled: bool = True):
     return dataclasses.field(default_factory=lambda: copy.deepcopy(default))
 
 
-def merge_with_default(cfg, name: str = "_schedule") -> dict:
-    """Field ``name`` of ``cfg`` deep-merged onto that field's default.
-
-    runkit replaces a dict field on override instead of merging it into the default, so
-    ``_schedule.env.w_support.start=2e6`` would leave only that leaf. Call this in the
-    config's ``__post_init__``: ``self._schedule = merge_with_default(self)``.
-    """
-    f = next(f for f in dataclasses.fields(cfg) if f.name == name)
-    default = f.default_factory() if f.default_factory is not dataclasses.MISSING else {}
-    return deep_merge(default, getattr(cfg, name) or {})
-
-
 @dataclasses.dataclass(frozen=True)
 class Entry:
     """One scheduled value: where it is, how it changes."""

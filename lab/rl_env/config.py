@@ -94,11 +94,11 @@ class WalkEnvCfg:
     # --- reward weights (docs/policy-and-reward-terms.md); every term is multiplied by
     # the policy dt. Values at full strength; a training schedule (``_schedule`` in the
     # experiment config, see scheduled_config.py) may scale them over training. ---
-    w_lin: float = 2.5              # R_lin  forward-velocity tracking (reward); kernel peaks
-                                    # at 1 (the paper's 10 is for its 0.25-peak kernel)
-    lin_sharpness: float = 20.0     # R_lin = K(lin_sharpness * err). Doc's 4 is too flat for
-                                    # 0.15 m/s: standing still would earn 92% of the max;
-                                    # at 20 it earns ~20%
+    w_lin: float = 5.0              # R_lin  forward-velocity tracking (reward); kernel peaks
+                                    # at 1 (the paper's 10 is for its 0.25-peak kernel). 2.5
+                                    # was below the gait costs: runs settled on standing
+    lin_sharpness: float = 40.0     # R_lin = K(lin_sharpness * err). Standing still at
+                                    # cmd 0.1 m/s earns 42% of the max at 20, 7% at 40
     w_yaw: float = 3.0              # R_yaw  yaw-rate tracking (reward); paper's 6 / 4 = 1.5,
                                     # doubled (2026-09-27) to hold the heading better
     yaw_sharpness: float = 1.0      # R_yaw = K(yaw_sharpness * err), err in rad/s

@@ -69,7 +69,7 @@ $$
 R_{lin} = K\left(4 \cdot \lVert v_{xy} - \hat{v}_{xy} \rVert\right)
 $$
 
-**Weight:** +2.5 (reward) · not curriculum-scaled · source: paper (10 with the paper's unnormalized kernel)
+**Weight:** +5.0 (reward) · not curriculum-scaled · source: paper's 10 is 2.5 with our normalized kernel; 2.5 was below the gait costs (runs settled on standing), so doubled. In the env the sharpness is 40, not 4: at a 0.1 m/s command, standing still then earns ~7% of the max instead of ~99%.
 
 v\_xy is the base velocity projected onto the surface tangent plane, expressed in the body frame; v̂\_xy is the command. The factor 4 sharpens the kernel: an error of 0.25 m/s already drops the reward from 1 to about 0.79.
 
