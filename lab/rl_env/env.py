@@ -18,23 +18,24 @@ Environment (Gymnasium):
   and velocities (12), ankle angles (8), previous action (12), command (3).
 
 Reward (docs/policy-and-reward-terms.md; the terms are pure functions in
-:mod:`.rewards`, composed in :meth:`WalkEnv.step`), every term times the policy dt; the
-regularization costs are also scaled by the curriculum factor ``k_c`` (``kc0`` ->
-1, ``k_c <- k_c ** kc_rate`` per PPO iteration):
+:mod:`.rewards`, composed in :meth:`WalkEnv.step`), every term times the policy dt:
 
     r = w_lin K(lin_sharpness |v_xy - v_hat|) + w_yaw K(yaw_sharpness |w_z|)
-        + k_c w_air sum_touchdown (min(t_air, air_max) - air_target)
-        - k_c (w_torque |tau|^2 + w_action_rate |a_t - a_t-1|^2 + w_joint_speed |qdot|^2
-               + w_orient |z_world - z_body| + w_height (d_hat - d)^2
-               + w_clear sum_air (h_hat - h_i)^2 |v_t,i|
-               + w_drag sum_{touching, not planted} |v_t,i|
-               + w_slip sum_planted (|v_t,i| + r_pad |w_n,i|)
-               + w_ankle sum_planted sum_ab max(0, |q| - q_safe)^2)
-        - k_support w_support max(0, min_support - n_planted)
-
-``k_support`` ramps the support cost in: 0 for the first ``support_start`` training
-steps, then linear to 1 over ``support_ramp`` steps (set by the training loop).
+        + w_air sum_touchdown (min(t_air, air_max) - air_target)
+        - w_torque |tau|^2 - w_action_rate |a_t - a_t-1|^2 - w_joint_speed |qdot|^2
+        - w_orient |z_world - z_body| - w_height (d_hat - d)^2
+        - w_clear sum_air (h_hat - h_i)^2 |v_t,i|
+        - w_drag sum_{touching, not planted} |v_t,i|
+        - w_slip sum_planted (|v_t,i| + r_pad |w_n,i|)
+        - w_ankle sum_planted sum_ab max(0, |q| - q_safe)^2
+        - w_support max(0, min_support - n_planted)
     K(x) = 4 / (e^x + 2 + e^-x)   (1 at x = 0)
+
+The weights are used as given. Changing them over training (a curriculum) is the
+caller's job: it pushes an adjusted config into ``env.cfg`` -- e.g. ``test_policy``
+evaluates a :class:`.scheduled_config.ScheduledConfig` and sets ``cfg`` via
+``set_wrapper_attr``. Setting ``cfg`` re-derives the constants the env computes from
+it (command vector, angle thresholds).
 
 Contact history: the env keeps the last ``contact_history`` policy steps of each
 foot's pad normal force (``force_hist``), and per-foot timers (``air_time``,
@@ -68,32 +69,26 @@ from .model import adhesion_actuators, build, pad_cell_bodies
 # Names of the reward terms, in the order they are logged (progress lines, CSV).
 TERMS = ("lin", "yaw", "air", "torque", "action_rate", "joint_speed", "orient", "height",
          "clear", "drag", "slip", "ankle", "support", "term")
-# The terms scaled by the curriculum factor k_c. Everything but the two tracking
-# rewards and the termination cost. The gait terms (air, support) are included: on
-# the floor they shape the gait; they are not about safety.
-REG = ("torque", "action_rate", "joint_speed", "orient", "height", "clear", "drag", "slip", "ankle",
-       "air")
-# `support` has its own factor, k_support (0 -> 1 on a schedule of training steps,
-# support_start / support_ramp), instead of k_c.
 
 
 class WalkEnv(gym.Env):
     """The spider on the floor, tracking a forward velocity. See the module docstring.
 
     One instance = one simulated robot. ``test_policy`` runs several in parallel
-    (one per subprocess) and updates the curriculum factor ``k_c`` from outside
-    (``VecEnv.set_attr("k_c", ...)``), and the support ramp ``k_support`` the same way.
+    (one per subprocess) and pushes an adjusted ``cfg`` into each once per PPO iteration
+    (its reward schedule; see the module docstring).
 
     Args:
         mcfg: the robot model (:class:`.config.ModelCfg`).
-        cfg: task, reward and curriculum (:class:`.config.WalkEnvCfg`).
+        cfg: task and reward (:class:`.config.WalkEnvCfg`).
         seed: seed for the first ``reset()`` if that call gives none.
     """
 
     metadata = {"render_modes": []}
 
     def __init__(self, mcfg: ModelCfg, cfg: WalkEnvCfg, seed: int = 0):
-        self.mcfg, self.cfg = mcfg, cfg                   # model / task + reward
+        self.mcfg = mcfg                                  # the robot model
+        self.cfg = cfg                                    # task + reward (property: derives constants)
 
         # --- model and timing ---
         _, self.model = build(mcfg, write=False)          # robot + floor + keyframes
@@ -103,8 +98,6 @@ class WalkEnv(gym.Env):
         self.n_sub = max(1, round(1.0 / (cfg.policy_hz * mcfg.timestep)))
         self.dt = self.n_sub * m.opt.timestep            # policy step (s)
         self.max_steps = int(cfg.episode_s / self.dt)    # episode length (policy steps)
-        self.k_c = cfg.kc0                               # curriculum factor, set from outside
-        self.k_support = 0.0                             # support ramp (0..1), set from outside
 
         # --- the `stand` pose: reset state and the action's zero point ---
         key = m.key("stand")
@@ -142,10 +135,7 @@ class WalkEnv(gym.Env):
         # height - this
         self.pad_drop = mcfg.pivot_height + mcfg.pad_thickness
         self.r_pad = 0.5 * mcfg.pad_size                  # turns pad yaw rate into edge speed
-        self.q_safe = math.radians(cfg.ankle_safe_deg)   # ankle angle without cost
-        self.cos_pad_flat = math.cos(math.radians(cfg.pad_tilt_max_deg))  # planted: pad flat
-        self.cos_tip = math.cos(math.radians(cfg.tip_deg))
-        self.cmd = np.array([cfg.cmd_vx, 0.0, 0.0])      # command: (vx, vy, yaw rate), body frame
+        # (constants from `cfg` -- q_safe, cos_pad_flat, cos_tip, cmd -- see the cfg setter)
 
         # --- gym spaces ---
         self.action_space = gym.spaces.Box(-1.0, 1.0, (12,), np.float32)
@@ -164,6 +154,23 @@ class WalkEnv(gym.Env):
 
         # scratch buffers for MuJoCo calls that write into an array
         self._vel, self._cf = np.zeros(6), np.zeros(6)
+
+    # ------------------------------------------------------------------ config
+    @property
+    def cfg(self) -> WalkEnvCfg:
+        """Task + reward config. Setting it (e.g. a scheduled, adjusted config pushed by
+        the training loop) re-derives the constants computed from it."""
+        return self._cfg
+
+    @cfg.setter
+    def cfg(self, cfg: WalkEnvCfg):
+        self._cfg = cfg
+        self.q_safe = math.radians(cfg.ankle_safe_deg)                    # ankle angle without cost
+        self.cos_pad_flat = math.cos(math.radians(cfg.pad_tilt_max_deg))  # planted: pad flat
+        self.cos_tip = math.cos(math.radians(cfg.tip_deg))
+        self.cmd = np.array([cfg.cmd_vx, 0.0, 0.0])   # command: (vx, vy, yaw rate), body frame
+        # not re-derived (fixed at construction): policy_hz / episode_s (timing) and
+        # contact_history (buffer size)
 
     # ------------------------------------------------------------------ helpers
     def _base_frame(self):
@@ -365,13 +372,11 @@ class WalkEnv(gym.Env):
             "drag": -cfg.w_drag * rw.foot_drag(v_t, touching, feet),
             "slip": -cfg.w_slip * rw.foot_slip(v_t, w_n, feet, self.r_pad),
             "ankle": -cfg.w_ankle * rw.ankle_range(q_ankle, feet, self.q_safe),
-            # gait: feet short of min_support planted (graded, ramped in by k_support); air
-            # time per touchdown (can be negative: a step shorter than air_target costs)
-            "support": -cfg.w_support * self.k_support * rw.min_support(feet, cfg.min_support),
+            # gait: feet short of min_support planted (graded); air time per touchdown
+            # (can be negative: a step shorter than air_target costs)
+            "support": -cfg.w_support * rw.min_support(feet, cfg.min_support),
             "air": cfg.w_air * rw.air_time(touchdown, air_td, cfg.air_target, cfg.air_max),
         }
-        for k in REG:                          # curriculum: scale the shaping terms
-            terms[k] *= self.k_c
         # per step -> times dt; plain floats from here on (for logging / the return value)
         terms = {k: float(v_ * self.dt) for k, v_ in terms.items()}
         terms["term"] = -cfg.w_term if terminated else 0.0        # one-time, not times dt

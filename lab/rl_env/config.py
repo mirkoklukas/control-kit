@@ -92,7 +92,8 @@ class WalkEnvCfg:
     reset_noise: float = 0.05       # uniform joint-angle noise at reset (rad)
 
     # --- reward weights (docs/policy-and-reward-terms.md); every term is multiplied by
-    # the policy dt. Regularization costs are also scaled by the curriculum k_c. ---
+    # the policy dt. Values at full strength; a training schedule (``_schedule`` in the
+    # experiment config, see scheduled_config.py) may scale them over training. ---
     w_lin: float = 2.5              # R_lin  forward-velocity tracking (reward); kernel peaks
                                     # at 1 (the paper's 10 is for its 0.25-peak kernel)
     lin_sharpness: float = 20.0     # R_lin = K(lin_sharpness * err). Doc's 4 is too flat for
@@ -112,10 +113,9 @@ class WalkEnvCfg:
     w_drag: float = 2.0             # C_drag sum_{touching, not planted} |v_t| (new, see doc)
     w_ankle: float = 5.0            # C_ankle sum_contact max(0, |q| - q_safe)^2
     w_air: float = 20.0             # R_air: per touchdown, (min(t_air, air_max) - air_target);
-                                    # times dt like all terms; curriculum-scaled
+                                    # times dt like all terms
     w_support: float = 5.0          # C_support: per foot short of min_support planted feet
-                                    # (graded). Not scaled by k_c but by its own ramp, see
-                                    # support_start / support_ramp (doc: 20, on the wall)
+                                    # (graded); doc: 20, on the wall
     w_term: float = 50.0            # termination cost (trunk contact / tipped over). The
                                     # paper's 1 would make sitting down (ending the episode)
                                     # cheaper than an episode of early exploration costs
@@ -139,14 +139,6 @@ class WalkEnvCfg:
 
     # --- termination ---
     tip_deg: float = 60.0           # terminate when body z is further than this from vertical
-
-    # --- curriculum ---
-    kc0: float = 0.4                # curriculum start; k_c <- k_c ** kc_rate per PPO iteration
-    kc_rate: float = 0.997
-    # support is ramped in separately (k_support): off until the policy walks, then up to
-    # full strength. Too strong too early and not stepping at all is the cheapest option.
-    support_start: int = 1_000_000  # training steps before the support cost starts
-    support_ramp: int = 2_000_000   # then rises linearly from 0 to 1 over this many steps
 
 
 def parse_overrides(cls, argv: list[str], extra: dict) -> tuple[object, dict]:

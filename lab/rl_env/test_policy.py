@@ -27,7 +27,7 @@ plus what runkit writes when asked, plus this experiment's own files under ``out
     checkpoints/current/                  every 20 PPO iterations and at the end, replacing
       model.zip, vecnormalize.pkl         the previous one (runkit's ctx.checkpoint;
                                           without a name: numbered ones); checkpoint.yaml
-                                          info: it, steps, ep_return, vx, k_c
+                                          info: it, steps, ep_return, vx
     metrics/run.jsonl                     one row per PPO iteration (ctx.record)
     metrics/eval.jsonl                    one row per eval (ctx.record("eval", ...))
     out/progress.png                      training curve, from metrics/run.jsonl
@@ -45,8 +45,15 @@ env.w_air=15 model.kp=12``. ``run`` takes ``key=value`` overrides and
 Environment, observation, action and reward: :mod:`.env` (:class:`WalkEnv`).
 
 Progress: one line per PPO iteration in the terminal (steps, fps, episode return
-and length, forward speed, k_c, and the per-term reward breakdown); the same rows go
-to ``metrics/run.jsonl``, plotted to ``out/progress.png`` at every checkpoint.
+and length, forward speed, the schedule factors of the shaping costs (``k_c``) and the
+support cost (``k_sup``), and the per-term reward breakdown); the same rows go to
+``metrics/run.jsonl`` (all schedule factors as ``schedule/<path>``), plotted to
+``out/progress.png`` at every checkpoint.
+
+Reward schedule: ``PolicyCfg._schedule`` (see :mod:`.scheduled_config`). Once per PPO
+iteration the progress callback evaluates it at the current step and pushes the
+resulting env config into every env; envs start with the schedule at step 0. eval uses
+the full-strength ``env`` config.
 """
 
 import dataclasses
@@ -61,28 +68,61 @@ from runkit import Experiment, RunContext, load_metrics, random_seed
 from .config import ModelCfg, WalkEnvCfg
 from .env import TERMS, WalkEnv
 from .model import build
+from .scheduled_config import (ScheduledConfig, geometric, linear, merge_with_default,
+                               scale, schedule)
 
 REPO = Path(__file__).resolve().parents[2]
 N_STEPS = 1024      # PPO rollout length per env and iteration
 
 
+# The default reward schedule (``PolicyCfg._schedule``), in training env steps.
+# Shaping costs: Hwangbo et al.'s curriculum factor, x0 ** (rate ** i) per PPO
+# iteration i (per = one iteration = 12 envs x 1024 steps).
+SHAPING = scale(geometric(x0=0.4, rate=0.997, per=12 * N_STEPS))
+# Support cost: off until the policy walks, then ramped in (too strong too early and not
+# stepping at all is the cheapest option).
+SUPPORT = scale(linear(start=1_000_000, length=2_000_000))
+
+
 @dataclasses.dataclass
 class PolicyCfg:
-    """Config of the policy test: model + env + training knobs."""
+    """Config of the policy test: model + env + training knobs + the reward schedule."""
     # one pad cell: magnets are off on the floor, extra cells only cost contacts
     model: ModelCfg = dataclasses.field(default_factory=lambda: ModelCfg(pad_cells=1))
     env: WalkEnvCfg = dataclasses.field(default_factory=WalkEnvCfg)
     steps: int = 10_000_000         # PPO env steps
     n_envs: int = 12                # parallel envs (SubprocVecEnv); 12 of 16 cores
     seed: int = random_seed()       # fresh per run, recorded; PPO + env j gets seed + j
+    # How `env` values change over training (scheduled_config.py): mirrors the config,
+    # e.g. `_schedule.env.w_support.start=2e6`, `_schedule.env.w_support.enabled=false`,
+    # `_schedule.enabled=false` (full strength throughout).
+    _schedule: dict = schedule({
+        "env.w_torque": SHAPING,
+        "env.w_action_rate": SHAPING,
+        "env.w_joint_speed": SHAPING,
+        "env.w_orient": SHAPING,
+        "env.w_height": SHAPING,
+        "env.w_clear": SHAPING,
+        "env.w_drag": SHAPING,
+        "env.w_slip": SHAPING,
+        "env.w_ankle": SHAPING,
+        "env.w_air": SHAPING,
+        "env.w_support": SUPPORT,
+    })
+
+    def __post_init__(self):
+        # runkit replaces a dict field on override instead of merging into its default;
+        # merge here, so `_schedule.env.w_support.start=2e6` changes just that leaf
+        self._schedule = merge_with_default(self)
 
 
 # ---------------------------------------------------------------------- training
-def make_env(cfg: PolicyCfg, rank: int):
-    """A factory for env number ``rank`` (seeded ``cfg.seed + rank``), for SubprocVecEnv."""
+def make_env(cfg: PolicyCfg, rank: int, step: int = 0):
+    """A factory for env number ``rank`` (seeded ``cfg.seed + rank``), for SubprocVecEnv.
+    Its reward config is the schedule at ``step`` (0: the start of training)."""
     def _f():
         from stable_baselines3.common.monitor import Monitor
-        return Monitor(WalkEnv(cfg.model, cfg.env, cfg.seed + rank))
+        return Monitor(WalkEnv(cfg.model, ScheduledConfig(cfg)(step).env, cfg.seed + rank))
     return _f
 
 
@@ -155,12 +195,14 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                            activation_fn=torch.nn.Tanh, log_std_init=-1.0),
         verbose=0, device="cpu", seed=cfg.seed)
 
+    schedule = ScheduledConfig(cfg)            # validated here: a bad key fails before training
+
     class Progress(BaseCallback):
-        """Per-iteration terminal line + metric row + progress; curriculum update;
+        """Per-iteration terminal line + metric row + progress; reward schedule update;
         checkpoints."""
 
         def _on_training_start(self):
-            self.t0, self.k_c, self.it = time.time(), cfg.env.kc0, 0
+            self.t0, self.it = time.time(), 0
             self.rows = []                     # all metric rows, for the curve
             self._reset_acc()
             print(f"{n_envs} envs x {model.n_steps} "
@@ -168,13 +210,6 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
             print(f"{'it':>4} {'steps':>9} {'fps':>6} {'return':>7} {'len':>5} {'vx':>6} "
                   f"{'duty':>5} {'air_s':>5} {'k_c':>5} {'k_sup':>5}  "
                   + " ".join(f"{k[:6]:>6}" for k in TERMS), flush=True)
-
-        def _k_support(self):
-            """Support ramp: 0 until support_start training steps, then linear to 1 over
-            support_ramp steps."""
-            e = cfg.env
-            return float(np.clip((self.num_timesteps - e.support_start) / max(e.support_ramp, 1),
-                                 0.0, 1.0))
 
         def _reset_acc(self):
             self.acc = {k: 0.0 for k in TERMS}
@@ -200,8 +235,10 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                    "ep_len": float(np.mean(el)) if el else 0.0,
                    "vx": self.vx / max(self.n, 1), "duty": self.planted / max(self.n, 1),
                    "air_s": float(np.mean(self.air)) if self.air else 0.0,
-                   "k_c": self.k_c, "k_support": self._k_support(),
                    "cmd_vx": cfg.env.cmd_vx, "air_target": cfg.env.air_target}
+            # the schedule's factors used in this rollout, under "schedule/<path>"
+            factors = schedule.values(self.num_timesteps - self.model.n_steps * n_envs)
+            row.update({f"schedule/{k}": v for k, v in factors.items()})
             # reward terms under "reward/<term>" (mean per policy step, times dt)
             row.update({f"reward/{k}": v / max(self.n, 1) for k, v in self.acc.items()})
             ctx.record(**row)                  # metrics/run.jsonl
@@ -210,15 +247,14 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
             self.last = row
             print(f"{row['it']:4d} {row['steps']:9d} {row['fps']:6d} {row['ep_return']:7.2f} "
                   f"{row['ep_len']:5.0f} {row['vx']:6.3f} {row['duty']:5.2f} {row['air_s']:5.2f} "
-                  f"{row['k_c']:5.2f} {row['k_support']:5.2f}  "
+                  f"{factors.get('env.w_torque', 1.0):5.2f} {factors.get('env.w_support', 1.0):5.2f}  "
                   + " ".join(f"{row[f'reward/{k}']:6.3f}" for k in TERMS), flush=True)
             self._reset_acc()
-            self.k_c = self.k_c ** cfg.env.kc_rate             # curriculum
-            # set_wrapper_attr, not set_attr: SB3's set_attr sets the attribute on the
-            # outermost wrapper (Monitor), so WalkEnv would never see it (until
-            # 2026-09-27 every run trained with k_c = kc0 and k_support = 0 for that reason)
-            self.training_env.env_method("set_wrapper_attr", "k_c", self.k_c)
-            self.training_env.env_method("set_wrapper_attr", "k_support", self._k_support())
+            # reward schedule: the env config for the next rollout, pushed into every env.
+            # set_wrapper_attr, not set_attr: SB3's set_attr only sets the attribute on the
+            # outermost wrapper (Monitor), so WalkEnv would never see it
+            env_cfg = schedule(self.num_timesteps).env
+            self.training_env.env_method("set_wrapper_attr", "cfg", env_cfg)
             # CHECKPOINT SCHEDULE (1/2): every 20 PPO iterations (20 x n_envs x N_STEPS
             # = ~245k env steps with 12 envs); (2/2) at the end, in _on_training_end
             if self.it % 20 == 0:
@@ -235,7 +271,8 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                 model.save(ckpt.dir / "model.zip")
                 venv.save(str(ckpt.dir / "vecnormalize.pkl"))
                 last = getattr(self, "last", {})
-                ckpt.info.update(it=self.it, steps=self.num_timesteps, k_c=self.k_c,
+                # the schedule is a function of `steps`: resuming evaluates it there
+                ckpt.info.update(it=self.it, steps=self.num_timesteps,
                                  **{k: last[k] for k in ("ep_return", "vx") if k in last})
             _plot(self.rows, run_dir / "progress.png")
 
@@ -284,7 +321,6 @@ def evaluate(cfg: PolicyCfg, ctx: RunContext) -> dict:
     venv.training, venv.norm_reward = False, False
     model = PPO.load(ckpt.dir / "model.zip", device="cpu")
     env = venv.venv.envs[0]
-    env.k_c, env.k_support = 1.0, 1.0           # full costs
     obs = venv.reset()
     log = {k: [] for k in ("qpos", "qvel", "ctrl", "force")}
     ret, vx = 0.0, []
@@ -343,7 +379,10 @@ def show(cfg: PolicyCfg, ctx: RunContext) -> None:
         r = rows[-1]
         print(f"progress it {r['it']}, {r['steps'] / 1e6:.2f}M steps: return "
               f"{r['ep_return']:.2f}, vx {r['vx']:.3f} (cmd {r['cmd_vx']}), "
-              f"duty {r['duty']:.2f}, air {r['air_s']:.2f} s, k_c {r['k_c']:.2f}")
+              f"duty {r['duty']:.2f}, air {r['air_s']:.2f} s")
+        sched = {k[len("schedule/"):]: v for k, v in r.items() if k.startswith("schedule/")}
+        if sched:
+            print("schedule " + ", ".join(f"{k} {v:.2f}" for k, v in sched.items()))
         _plot(rows, out / "progress.png")          # needs >= 2 rows
         if (out / "progress.png").exists():
             print(f"curve    {_rel(out / 'progress.png')}")

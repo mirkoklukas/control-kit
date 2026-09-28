@@ -1,6 +1,7 @@
 # Proposal: `ScheduledConfig` -- config values that follow a schedule
 
-Status: proposal, rewritten 2026-09-28 (notation: top-level `_schedule`; names `ScheduledConfig` / `_schedule` chosen the same day). Nothing implemented. Records where the
+Status: implemented 2026-09-28 in `lab/rl_env/scheduled_config.py` (scale / lerp; linear /
+geometric / step; wiring: the training callback pushes `sc(step).env` into the envs). Was: proposal, rewritten 2026-09-28 (notation: top-level `_schedule`; names `ScheduledConfig` / `_schedule` chosen the same day). Nothing implemented. Records where the
 discussion landed and what is still open.
 
 ## Problem

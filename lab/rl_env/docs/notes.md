@@ -259,6 +259,17 @@ Rotate gravity instead of the ground; real wall geometry only for transitions.
     `env_method("set_wrapper_attr", ...)`, verified on the training stack (torque term
     x2.5 for k_c 0.4 -> 1.0). Old runs' results should be read with this in mind.
     Proposal for a general mechanism: `scheduled-config-proposal.md` (`ScheduledConfig`, `_schedule`).
+  - ScheduledConfig implemented (2026-09-28, `scheduled_config.py`): `PolicyCfg._schedule`
+    mirrors the config (`env.w_*: {op, kind, ...}`); `ScheduledConfig(cfg)(step)` returns
+    the adjusted config. The progress callback pushes `sc(num_timesteps).env` into every
+    env once per PPO iteration (`set_wrapper_attr("cfg", ...)`); envs start at step 0.
+    `k_c`, `k_support`, `REG` and the WalkEnvCfg fields kc0 / kc_rate / support_start /
+    support_ramp are gone; the default schedule reproduces them exactly (geometric
+    x0 0.4, rate 0.997 per iteration on the ten shaping weights; linear 1M..3M on
+    w_support; rewards identical to the old scaling at equal factors). `WalkEnv.cfg` is
+    a property: setting it re-derives cmd / angle thresholds. Metrics: `schedule/<path>`.
+    Note: runkit replaces a dict field on override instead of merging -> merged in
+    `PolicyCfg.__post_init__`. Old run dirs have kc0 etc. in env: and no longer load.
   - Why `gymnasium.Env` and not a Brax env (2026-09-25): SB3 needs the Gymnasium API,
     and a stateful numpy/MuJoCo-C env is quick to write and debug on the Mac (contact
     loop, `mj_contactForce`, `mj_objectVelocity`, contact history). A Brax env is pure
