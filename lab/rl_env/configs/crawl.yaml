@@ -67,6 +67,7 @@ env:
   w_slip: 30.0           # bd35df55 at 5: two feet barely stepped and were slid along instead;
                          # b46f0f04 at 10 (w_support 15): two feet never lifted, slid along
   w_drag: 10.0           # sliding feet that are lightly loaded count as drag, not slip
+  w_hard_clear: 20.0     # new: feet below 1 cm (skimming, not just touching) stay put
   w_ankle: 5.0
   w_air: 20.0
   w_support: 15.0        # ee9b300d at 2: 0.3 feet short on average (trot-ish overlap);
@@ -74,6 +75,8 @@ env:
   w_stall: 5.0           # new: at full cost a stall pays twice what the lost lin reward pays
   w_term: 50.0
   clear_height: 0.06
+  hard_clear_height: 0.01
+  hard_clear_vtol: 0.01
   ankle_safe_deg: 30.0
   air_target: 0.15       # bd35df55 at 0.25: steps averaged 0.18 s, so every touchdown cost
                          # and the cheapest foot was one that never stepped
@@ -135,6 +138,12 @@ _schedule:
       rate: 0.997
       per: 12288
     w_slip:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_hard_clear:
       op: scale
       kind: geometric
       x0: 0.4

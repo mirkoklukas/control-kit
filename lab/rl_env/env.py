@@ -27,6 +27,7 @@ Reward (docs/policy-and-reward-terms.md; the terms are pure functions in
         - w_orient |z_world - z_body| - w_height (d_hat - d)^2
         - w_clear sum_air (h_hat - h_i)^2 |v_t,i|
         - w_drag sum_{touching, not planted} |v_t,i|
+        - w_hard_clear sum_{h_i < hard_clear_height} max(0, |v_t,i| - hard_clear_vtol)
         - w_slip sum_planted (|v_t,i| + r_pad |w_n,i|)
         - w_ankle sum_planted sum_ab max(0, |q| - q_safe)^2
         - w_support max(0, min_support - n_planted)
@@ -456,6 +457,8 @@ class WalkEnv(gym.Env):
             # slip and ankle range when planted
             "clear": -cfg.w_clear * rw.foot_clearance(h, v_t, touching, cfg.clear_height),
             "drag": -cfg.w_drag * rw.foot_drag(v_t, touching, feet),
+            "hard_clear": -cfg.w_hard_clear * rw.hard_clearance(
+                h, v_t, cfg.hard_clear_height, cfg.hard_clear_vtol),
             "slip": -cfg.w_slip * rw.foot_slip(v_t, w_n, feet, self.r_pad),
             "ankle": -cfg.w_ankle * rw.ankle_range(q_ankle, feet, self.q_safe),
             # gait: feet short of min_support planted (graded); air time per touchdown

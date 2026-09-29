@@ -130,6 +130,23 @@ def foot_clearance(h, v_t, touching, h_hat):
     return np.sum(np.where(touching, 0.0, (h_hat - h) ** 2 * v_t))
 
 
+def hard_clearance(h, v_t, h_min, v_tol):
+    """``C_hard_clear = sum_{h_i < h_min} max(0, |v_t,i| - v_tol)``: feet low and moving.
+
+    A foot below ``h_min`` (planted, touching, or skimming just above the surface)
+    should not move along the surface beyond ``v_tol``. A hard step in height: no cost
+    at or above ``h_min``. Overlaps slip (planted) and drag (touching); it adds the
+    skimming foot that touches nothing, which clearance prices only weakly near h = 0.
+
+    Args:
+        h: (4,) height of each pad face above the surface (m).
+        v_t: (4,) each foot's speed along the surface (m/s).
+        h_min: feet below this height count (m).
+        v_tol: speed allowed without cost (m/s).
+    """
+    return np.sum(np.where(h < h_min, np.maximum(0.0, v_t - v_tol), 0.0))
+
+
 def foot_drag(v_t, touching, planted):
     """``C_drag = sum_{touching, not planted} |v_t,i|``: feet scraping along the surface.
 

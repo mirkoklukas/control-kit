@@ -111,6 +111,8 @@ class WalkEnvCfg:
     w_slip: float = 5.0             # C_slip sum_planted |v_t| + r_pad |w_n|; paper 2, raised
                                     # (2026-09-27): planted pads were skating ~0.1 m/s
     w_drag: float = 2.0             # C_drag sum_{touching, not planted} |v_t| (new, see doc)
+    w_hard_clear: float = 0.0       # C_hard_clear sum_{h < hard_clear_height}
+                                    # max(0, |v_t| - hard_clear_vtol): low feet stay put
     w_ankle: float = 5.0            # C_ankle sum_contact max(0, |q| - q_safe)^2
     w_air: float = 20.0             # R_air: per touchdown, (min(t_air, air_max) - air_target);
                                     # times dt like all terms
@@ -124,6 +126,8 @@ class WalkEnvCfg:
 
     # --- reward parameters ---
     clear_height: float = 0.06      # h_hat (m)
+    hard_clear_height: float = 0.01 # h_min: feet below this should not move along the floor (m)
+    hard_clear_vtol: float = 0.01   # speed allowed below h_min (m/s)
     ankle_safe_deg: float = 30.0    # q_safe
     air_target: float = 0.25        # t_hat: desired air time per step (s)
     air_max: float = 0.5            # air time counted at most this (no lingering legs)

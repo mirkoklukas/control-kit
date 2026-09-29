@@ -185,6 +185,20 @@ h\_i is the height of foot i above the surface along n̂, and v\_t,i its speed t
 - Pick ĥ from your leg geometry and expected surface features (welds, bolt heads): start at 5 cm.
 - Compute h\_i in sim with a ray cast from the foot along −n̂ (MuJoCo `mj_ray`).
 
+### Hard clearance
+
+$$
+C_{hard\_clear} = \sum_{i \,:\, h_i < h_{min}} \max\left(0,\; \lVert v_{t,i} \rVert - v_{tol}\right)
+$$
+
+**Weight:** 0 (cost; 20 in `configs/crawl.yaml`) · h\_min = `hard_clear_height` 1 cm, v\_tol = `hard_clear_vtol` 0.01 m/s · scheduled like slip and drag (from 0.4 of full weight) · source: new
+
+A foot below h\_min must not move along the surface (beyond v\_tol, for settling noise), whatever its contact state: planted, touching, or skimming just above the surface. "Hard" is only the name: a step in height, no cost at or above h\_min.
+
+**Why:** the other foot terms leave a gap. Slip covers planted feet and drag touching ones; a foot hovering a few mm up touches nothing, and C\_clear near h = 0 is only ĥ² ‖v\_t‖ (0.36 ‖v\_t‖ at ĥ = 6 cm, weight 100). So a foot could skim along the floor almost for free.
+
+**Overlap:** all feet count, so a sliding planted foot pays slip and this term, a touching one drag and this term.
+
 ### Foot slip
 
 $$
