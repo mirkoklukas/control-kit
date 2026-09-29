@@ -43,10 +43,11 @@ def strips(planted, dt, *, bin_s=None, width=100, min_support=None) -> str:
         out.append(f"t {i0 * s:5.2f} .. {(i0 + len(blk)) * s:5.2f} s   ({s:.2f} s per char)")
         for f in range(b.shape[1]):
             out.append(f"  foot{f}  " + "".join("x" if p else "." for p in blk[:, f]))
-        short = "".join("!" if min_support is not None and n < min_support else " "
-                        for n in blk.sum(1)).rstrip()
-        if short:                                    # only in a block that has some
-            out.append("  short  " + short)
+
+        # short = "".join("!" if min_support is not None and n < min_support else " "
+                        # for n in blk.sum(1)).rstrip()
+        # if short:                                    # only in a block that has some
+            # out.append("  short  " + short)
         out.append("")
     return "\n".join(out)
 

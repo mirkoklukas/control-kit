@@ -93,22 +93,46 @@ $$
 
 ### Stall
 
+Progress debt: how far the base lags behind a minimum pace along the command.
+
 $$
 \begin{aligned}
-C_{stall} &= \mathrm{clip}\left(\frac{t_{stall} - t_{grace}}{t_{ramp}},\; 0,\; 1\right) \\
-t_{stall} &= \text{time since } v_{xy} \cdot \hat{c} \ge f \, \lVert \hat{v}_{xy} \rVert \text{ last held}
+L_0 &= 0 \\
+L_k &= \max\left(0,\; L_{k-1} + f s\,dt - \Delta x_k \cdot d\right) \\
+t^{behind}_k &= L_k / (f s) \\
+C_{stall} &= \mathrm{clip}\left(\frac{t^{behind}_k - t_{grace}}{t_{ramp}},\; 0,\; 1\right)
 \end{aligned}
 $$
 
 **Weight:** 0 (cost; 5 in `configs/crawl.yaml`) · f = `stall_frac` 0.5, t\_grace = `stall_grace` 0.5 s, t\_ramp = `stall_ramp` 1.0 s · not scheduled · source: new
 
-ĉ is the unit command direction; the condition is forward progress, speed along the command of at least a fraction of the commanded speed. A zero command always counts as progress. Sideways drift and overshoot do not count as a stall (R\_lin covers those).
+s = ‖cmd\_xy‖ is the commanded speed and d = cmd\_xy / s its direction (body frame); f s is the minimum pace. Δx\_k is the base displacement over policy step k, rotated into the body frame (its xy part is dotted with d). For s = 0, L stays 0.
 
-**Why, next to R\_lin:** standing still loses the R\_lin reward at a constant rate, so its cost grows linearly with duration, and stillness wins whenever the gait costs (support, slip, drag) are larger. C\_stall is free for t\_grace (stops during gait transitions), then its per-step cost rises, so the summed cost grows quadratically during the ramp; at the cap it is an extra w\_stall per step on top of the lost R\_lin.
+**Closed form** (Lindley recursion). With x\_i = f s dt − Δx\_i · d,
 
-**Markov:** t\_stall is part of the observation, as t\_stall / (t\_grace + t\_ramp) capped at 1; otherwise the same state would carry different costs.
+$$
+\begin{aligned}
+L_k &= \max_{0 \le j \le k} \sum_{i=j+1}^{k} x_i \\
+\sum_{i=j+1}^{k} x_i &= f s\,(t_k - t_j) - \Delta\ell_{j \to k}
+\end{aligned}
+$$
 
-**Pattern:** the timer is a `ViolationTimer` (env.py) and the ramp `rewards.ramp`; both are generic, for other persistent violations too (a sliding planted foot, a foot that never lifts).
+where Δℓ is the distance covered along d over (t\_j, t\_k] and j = k is the empty sum 0. Proof by induction: max(0, L\_{k-1} + x\_k) splits into j = k (the 0) and j ≤ k − 1 (L\_{k-1} + x\_k). So L\_k is the largest shortfall, over every window ending now, of the distance covered against the distance at minimum pace.
+
+**Properties:**
+
+- A finite-window check (mean velocity over the last W seconds) can be gamed by oscillating with a period longer than W. L checks all windows at once: a cycle with zero net progress over period P leaves a shortfall f s n P after n cycles.
+- Surplus is forgotten (clamp at 0), shortfalls are not: running ahead cannot be banked, and moving back adds to the debt.
+- Standing still for T gives t\_behind ≥ T; at or above the pace, L = 0.
+- t\_grace is a lag in distance: up to t\_grace f s is free (2.5 cm at 0.1 m/s), for the speed dips within a stride.
+
+**Why, next to R\_lin:** standing still loses the R\_lin reward at a constant rate, so stillness wins whenever the gait costs (support, slip, drag) are larger. C\_stall rises with the time behind: its summed cost grows quadratically during the ramp; at the cap it is an extra w\_stall per step on top of the lost R\_lin.
+
+**Markov:** t\_behind is part of the observation, as t\_behind / (t\_grace + t\_ramp) capped at 1.
+
+**Caveats:** Δx is rotated with the body orientation at the end of the step, so this is distance along the heading, not world displacement. With a large heading drift, "progress" follows the drifting heading.
+
+**Pattern:** `ProgressDebt` (env.py) and `rewards.ramp`. For conditions without a distance (a sliding planted foot, a foot that never lifts), `ViolationTimer` (time a condition has been violated continuously) plays the role of t\_behind.
 
 ## Regularization terms (costs)
 

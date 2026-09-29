@@ -419,7 +419,7 @@ def evaluate(ckpt: Checkpoint) -> dict:
     # Per policy step: the simulation state (qpos, qvel, ctrl, for the replay) and the
     # per-foot contact state from the env's info (normal force, planted, position).
     log = {k: [] for k in ("qpos", "qvel", "ctrl", "force", "planted", "foot_pos")}
-    ret, vx = 0.0, []
+    ret, vx, stall = 0.0, [], []
     for _ in range(env.max_steps):
         act, _ = model.predict(venv.normalize_obs(obs), deterministic=True)
         obs, r, terminated, truncated, info = env.step(act)
@@ -433,6 +433,7 @@ def evaluate(ckpt: Checkpoint) -> dict:
         # the env's raw reward (not normalized) and the forward speed in the body frame
         ret += float(r)
         vx.append(info["vx"])
+        stall.append(-info["terms"]["stall"] / env.dt)     # stall cost per second, >= 0
         if terminated or truncated:
             break
 
@@ -481,12 +482,14 @@ def evaluate(ckpt: Checkpoint) -> dict:
     (eval_dir / "eval.yaml").write_text(yaml.safe_dump(summary, sort_keys=False))
 
     # The replay for `ctk play`: the logged episode (npz) with the time per frame and
-    # the path of the model it ran on, written next to it as MJCF (xml).
+    # the path of the model it ran on, written next to it as MJCF (xml). The stall cost
+    # (w_stall * ramp) goes in as the live plot.
     xml = eval_dir / "rollout.xml"
     spec, _ = build(cfg.model, write=False)
     xml.write_text(spec.to_xml())
     np.savez(eval_dir / "rollout.npz", **{k: np.asarray(v) for k, v in log.items()},
-             timestep=env.dt, model=_rel(xml))
+             timestep=env.dt, model=_rel(xml), plot=np.asarray(stall)[:, None],
+             plot_labels=["stall"], plot_title="stall cost")
     print(f"saved {_rel(eval_dir)}/eval.yaml, rollout.npz (+ .xml)")
     return summary
 

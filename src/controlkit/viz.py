@@ -50,7 +50,8 @@ def play(
     `force_vec` (T, K, 3) are K external forces per frame (application point, force
     in N), drawn as red arrows at `force_scale` m/N (optional scalar; default the
     model's contact-force scale, `vis.map.force`); `plot` (T, K) is drawn as a live
-    line plot (bottom left, last `plot_window` seconds up to the current frame), with
+    line plot (bottom right of the 3D view, clear of the viewer's side panels; last
+    `plot_window` seconds up to the current frame), with
     optional `plot_labels` (K,) and `plot_title`.
 
     Playback keys: space = pause/resume, left/right = step one frame (scrub while
@@ -148,9 +149,12 @@ def play(
                 _draw_forces(viewer.user_scn, mj_model, f_pos[i], f_vec[i], scale=f_scale)
             if fig is not None:
                 _update_figure(fig, plot, i, dt, plot_window)
+                # viewport = the 3D view between the side panels (window pixels)
                 vp = viewer.viewport
-                w, h = (vp.width, vp.height) if vp is not None else (1200, 900)
-                viewer.set_figures((mujoco.MjrRect(0, 0, w // 3, h // 3), fig))
+                x0, y0, w, h = ((vp.left, vp.bottom, vp.width, vp.height) if vp is not None
+                                else (0, 0, 1200, 900))
+                fw, fh = w // 3, h // 3
+                viewer.set_figures((mujoco.MjrRect(x0 + w - fw, y0, fw, fh), fig))
             viewer.sync()
 
             if st["paused"]:
