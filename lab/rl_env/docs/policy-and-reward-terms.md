@@ -91,6 +91,25 @@ $$
 
 **Setup needed:** start with a yaw command range of ±0.5 rad/s (start value).
 
+### Stall
+
+$$
+\begin{aligned}
+C_{stall} &= \mathrm{clip}\left(\frac{t_{stall} - t_{grace}}{t_{ramp}},\; 0,\; 1\right) \\
+t_{stall} &= \text{time since } v_{xy} \cdot \hat{c} \ge f \, \lVert \hat{v}_{xy} \rVert \text{ last held}
+\end{aligned}
+$$
+
+**Weight:** 0 (cost; 5 in `configs/crawl.yaml`) · f = `stall_frac` 0.5, t\_grace = `stall_grace` 0.5 s, t\_ramp = `stall_ramp` 1.0 s · not scheduled · source: new
+
+ĉ is the unit command direction; the condition is forward progress, speed along the command of at least a fraction of the commanded speed. A zero command always counts as progress. Sideways drift and overshoot do not count as a stall (R\_lin covers those).
+
+**Why, next to R\_lin:** standing still loses the R\_lin reward at a constant rate, so its cost grows linearly with duration, and stillness wins whenever the gait costs (support, slip, drag) are larger. C\_stall is free for t\_grace (stops during gait transitions), then its per-step cost rises, so the summed cost grows quadratically during the ramp; at the cap it is an extra w\_stall per step on top of the lost R\_lin.
+
+**Markov:** t\_stall is part of the observation, as t\_stall / (t\_grace + t\_ramp) capped at 1; otherwise the same state would carry different costs.
+
+**Pattern:** the timer is a `ViolationTimer` (env.py) and the ramp `rewards.ramp`; both are generic, for other persistent violations too (a sliding planted foot, a foot that never lifts).
+
 ## Regularization terms (costs)
 
 All are costs. These shape how the robot moves. All are multiplied by the curriculum factor k\_c.

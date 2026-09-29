@@ -116,6 +116,8 @@ class WalkEnvCfg:
                                     # times dt like all terms
     w_support: float = 5.0          # C_support: per foot short of min_support planted feet
                                     # (graded); doc: 20, on the wall
+    w_stall: float = 0.0            # C_stall ramp(t_stall): t_stall = time without forward
+                                    # progress (v_xy . c_hat < stall_frac |cmd_xy|)
     w_term: float = 50.0            # termination cost (trunk contact / tipped over). The
                                     # paper's 1 would make sitting down (ending the episode)
                                     # cheaper than an episode of early exploration costs
@@ -126,6 +128,9 @@ class WalkEnvCfg:
     air_target: float = 0.25        # t_hat: desired air time per step (s)
     air_max: float = 0.5            # air time counted at most this (no lingering legs)
     min_support: int = 3            # crawl: at most one foot in the air
+    stall_frac: float = 0.5         # progress: speed along the command >= this * |cmd_xy|
+    stall_grace: float = 0.5        # stall time without cost (s)
+    stall_ramp: float = 1.0         # then the cost rises to w_stall over this (s)
 
     # --- contact history ---
     contact_force_min: float = 1.0  # a foot is planted (loaded) above this normal force (N)

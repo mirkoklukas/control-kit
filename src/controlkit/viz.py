@@ -54,7 +54,9 @@ def play(
     optional `plot_labels` (K,) and `plot_title`.
 
     Playback keys: space = pause/resume, left/right = step one frame (scrub while
-    paused), up/down = slower/faster. The viewer's time readout tracks the frame.
+    paused), up/down = slower/faster, backspace = restart from the first frame
+    (keeps the pause state), esc = close the viewer. The viewer's time readout
+    tracks the frame.
     """
     from mujoco import viewer as mj_viewer
 
@@ -89,14 +91,20 @@ def play(
     n = len(qpos)
     model_path = Path(model) if model is not None else _ROOT / str(npz["model"])
     print(f"loaded {n} frames from {file} (dt={dt}s); model={model_path}")
-    print("keys: space=pause/resume  left/right=step frame  up/down=speed")
+    print("keys: space=pause/resume  left/right=step frame  up/down=speed  "
+          "backspace=restart  esc=close")
 
     # GLFW key codes the passive viewer hands to key_callback.
-    SPACE, RIGHT, LEFT, UP, DOWN = 32, 262, 263, 265, 264
-    st = {"paused": False, "idx": 0, "step": 0, "speed": 1.0}
+    SPACE, RIGHT, LEFT, UP, DOWN, ESC, BACKSPACE = 32, 262, 263, 265, 264, 256, 259
+    st = {"paused": False, "idx": 0, "step": 0, "speed": 1.0, "quit": False,
+          "restart": False}
 
     def on_key(key):
-        if key == SPACE:
+        if key == ESC:
+            st["quit"] = True
+        elif key == BACKSPACE:
+            st["restart"] = True     # applied by the loop (callback runs on the viewer thread)
+        elif key == SPACE:
             st["paused"] = not st["paused"]
         elif key == RIGHT:
             st["paused"], st["step"] = True, 1
@@ -119,7 +127,9 @@ def play(
     with mj_viewer.launch_passive(mj_model, data, key_callback=on_key) as viewer:
         if contacts:
             viewer.opt.flags[mujoco.mjtVisFlag.mjVIS_CONTACTFORCE] = True
-        while viewer.is_running():
+        while viewer.is_running() and not st["quit"]:
+            if st["restart"]:
+                st["idx"], st["step"], st["restart"] = 0, 0, False
             i = st["idx"] % n
             data.qpos[:] = qpos[i]
             data.qvel[:] = qvel[i]

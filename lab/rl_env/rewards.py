@@ -192,6 +192,25 @@ def min_support(planted, n_min):
     return np.maximum(0.0, n_min - np.sum(planted)).astype(float)
 
 
+def ramp(t, grace, t_ramp):
+    """``g(t) = clip((t - grace) / t_ramp, 0, 1)``: a cost that grows with how long a
+    condition has been violated (see ``ViolationTimer`` in env.py).
+
+    Free for the first ``grace`` seconds (brief transients), then rising linearly to 1
+    over ``t_ramp`` seconds and capped there. Summed over a violation, the cost grows
+    ~quadratically with its duration during the ramp, linearly after the cap.
+
+    Args:
+        t: time the condition has been violated continuously (s), scalar or array.
+        grace: violation time without cost (s).
+        t_ramp: time from the end of the grace period to full cost (s).
+
+    Returns:
+        The cost in [0, 1], same shape as ``t``.
+    """
+    return np.clip((np.asarray(t) - grace) / t_ramp, 0.0, 1.0)
+
+
 def air_time(touchdown, air_at_touchdown, target, t_max):
     """``R_air = sum_touchdown (min(t_air, t_max) - target)``: step length in time.
 

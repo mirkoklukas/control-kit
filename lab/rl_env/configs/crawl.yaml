@@ -71,6 +71,7 @@ env:
   w_air: 20.0
   w_support: 15.0        # ee9b300d at 2: 0.3 feet short on average (trot-ish overlap);
                          # f8a32a8e at 6: diagonal pairs overlap, <3 planted 10% of steps
+  w_stall: 5.0           # new: at full cost a stall pays twice what the lost lin reward pays
   w_term: 50.0
   clear_height: 0.06
   ankle_safe_deg: 30.0
@@ -78,6 +79,9 @@ env:
                          # and the cheapest foot was one that never stepped
   air_max: 0.3
   min_support: 3
+  stall_frac: 0.5
+  stall_grace: 0.5
+  stall_ramp: 1.0
   contact_force_min: 1.0
   contact_touch_min: 0.05
   pad_tilt_max_deg: 3.0

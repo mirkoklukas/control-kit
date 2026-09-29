@@ -13,9 +13,10 @@ Environment (Gymnasium):
 - Reset: ``stand`` keyframe + uniform joint noise ``reset_noise``.
 - Action (12,) in [-1, 1]: joint position targets = ``stand`` + ``action_scale`` *
   action, clipped to the joint limits, sent to the leg servos.
-- Observation (56,): gravity in the body frame (3), base linear velocity (3) and
+- Observation (57,): gravity in the body frame (3), base linear velocity (3) and
   angular velocity (3) in the body frame, joint positions relative to ``stand`` (12)
-  and velocities (12), ankle angles (8), previous action (12), command (3).
+  and velocities (12), ankle angles (8), previous action (12), command (3), stall
+  time as a fraction of the time to full stall cost (1), capped at 1.
 
 Reward (docs/policy-and-reward-terms.md; the terms are pure functions in
 :mod:`.rewards`, composed in :meth:`WalkEnv.step`), every term times the policy dt:
@@ -29,6 +30,7 @@ Reward (docs/policy-and-reward-terms.md; the terms are pure functions in
         - w_slip sum_planted (|v_t,i| + r_pad |w_n,i|)
         - w_ankle sum_planted sum_ab max(0, |q| - q_safe)^2
         - w_support max(0, min_support - n_planted)
+        - w_stall ramp(t_stall; stall_grace, stall_ramp)
     K(x) = 4 / (e^x + 2 + e^-x)   (1 at x = 0)
 
 The weights are used as given. Changing them over training (a curriculum) is the
@@ -45,6 +47,12 @@ position (``foot_pos_hist``, ankle pivot), and per-foot timers (``air_time``,
 ``contact_touch_min``. Touching but not planted (light, or on a tilted pad): the drag
 term. The air-time and
 support terms read from it.
+
+Violation timers (:class:`ViolationTimer`): how long a condition has been violated
+continuously; a cost ramps up with it (:func:`.rewards.ramp`), so brief violations
+are free and persistent ones get expensive. The timer is in the observation, so the
+reward stays Markov. Used for stalling: ``t_stall`` counts while the speed along the
+command is below ``stall_frac`` of the commanded speed.
 
 Termination (cost ``w_term``): trunk touches the floor, or the body tips more than
 ``tip_deg`` from vertical. Truncation at ``episode_s``.
@@ -66,6 +74,33 @@ import numpy as np
 from . import rewards as rw
 from .config import ModelCfg, WalkEnvCfg
 from .model import adhesion_actuators, build, pad_cell_bodies
+
+class ViolationTimer:
+    """Time a condition has been violated continuously: reset to 0 while it holds.
+
+    Args:
+        shape: shape of the condition (``()`` for one scalar condition, ``(4,)`` per foot).
+    """
+
+    def __init__(self, shape=()):
+        self.t = np.zeros(shape)
+
+    def reset(self):
+        self.t = np.zeros_like(self.t)
+
+    def update(self, ok, dt):
+        """Advance by one step of ``dt`` seconds.
+
+        Args:
+            ok: bool (``shape``), condition satisfied this step.
+            dt: step length (s).
+
+        Returns:
+            The updated violation time (s).
+        """
+        self.t = np.where(ok, 0.0, self.t + dt)
+        return self.t
+
 
 class WalkEnv(gym.Env):
     """The spider on the floor, tracking a forward velocity. See the module docstring.
@@ -135,7 +170,7 @@ class WalkEnv(gym.Env):
 
         # --- gym spaces ---
         self.action_space = gym.spaces.Box(-1.0, 1.0, (12,), np.float32)
-        self.observation_space = gym.spaces.Box(-np.inf, np.inf, (56,), np.float32)
+        self.observation_space = gym.spaces.Box(-np.inf, np.inf, (57,), np.float32)
 
         # --- per-episode state (set properly in reset) ---
         self._seed = seed                  # used for the first reset if none is given
@@ -149,6 +184,7 @@ class WalkEnv(gym.Env):
         self.planted = np.zeros(4, bool)   # foot planted at the latest step
         self.air_time = np.zeros(4)        # time since lift-off (0 while planted), s
         self.planted_time = np.zeros(4)    # time since touchdown (0 while in the air), s
+        self.stall = ViolationTimer()      # time without forward progress, s
 
         # scratch buffers for MuJoCo calls that write into an array
         self._vel, self._cf = np.zeros(6), np.zeros(6)
@@ -185,9 +221,9 @@ class WalkEnv(gym.Env):
         return R, v_body, w_body
 
     def _obs(self):
-        """The observation (56,), float32. Layout: see the module docstring."""
+        """The observation (57,), float32. Layout: see the module docstring."""
         R, v, w = self._base_frame()
-        d = self.data
+        d, cfg = self.data, self.cfg
         return np.concatenate([
             R.T @ np.array([0.0, 0.0, -1.0]),                     # gravity direction, body (3)
             v, w,                                                 # base velocities, body (3 + 3)
@@ -196,6 +232,7 @@ class WalkEnv(gym.Env):
             d.qpos[self.ank_qadr],                                # ankle angles (8)
             self.prev_action,                                     # previous action (12)
             self.cmd,                                             # command (3)
+            [min(self.stall.t / (cfg.stall_grace + cfg.stall_ramp), 1.0)],  # stall time (1)
         ]).astype(np.float32)
 
     def _contact_state(self):
@@ -315,6 +352,7 @@ class WalkEnv(gym.Env):
         self.foot_pos_hist = np.zeros((self.cfg.contact_history, 4, 3))
         self.planted = self._planted(force)
         self.air_time, self.planted_time = np.zeros(4), np.zeros(4)
+        self.stall.reset()
         return self._obs(), {}
 
     def step(self, action):
@@ -329,7 +367,8 @@ class WalkEnv(gym.Env):
             ``terms`` (each reward term, already times dt), ``vx`` (forward speed,
             body frame), ``force`` (per-foot normal force), ``planted`` (per-foot
             bool), ``foot_pos`` ((4, 3) world positions of the ankle pivots) and
-            ``air_td`` (air times of this step's touchdowns), for logging.
+            ``air_td`` (air times of this step's touchdowns) and ``stall_time``
+            (time without forward progress, s), for logging.
         """
         cfg, m, d = self.cfg, self.model, self.data
 
@@ -360,6 +399,11 @@ class WalkEnv(gym.Env):
             w_n[i] = wv[2]                                    # twist about the floor normal
             h[i] = d.xpos[self.feet[i], 2] - self.pad_drop    # pad face above the floor
         q_ankle = d.qpos[self.ank_qadr].reshape(4, 2)         # (a, b) per foot
+        # stall: progress = speed along the command direction, vs. a fraction of its size
+        cmd_xy = self.cmd[:2]
+        cmd_speed = np.linalg.norm(cmd_xy)
+        progress = v[:2] @ cmd_xy / max(cmd_speed, 1e-9)
+        t_stall = self.stall.update(progress >= cfg.stall_frac * cmd_speed, self.dt)
 
         # --- the reward terms (rewards.py): +w * reward, -w * cost ---
         terms = {
@@ -382,6 +426,8 @@ class WalkEnv(gym.Env):
             # (can be negative: a step shorter than air_target costs)
             "support": -cfg.w_support * rw.min_support(feet, cfg.min_support),
             "air": cfg.w_air * rw.air_time(touchdown, air_td, cfg.air_target, cfg.air_max),
+            # stalling (cost): ramps up with the time without forward progress
+            "stall": -cfg.w_stall * rw.ramp(t_stall, cfg.stall_grace, cfg.stall_ramp),
         }
         # per step -> times dt; plain floats from here on (for logging / the return value)
         terms = {k: float(v_ * self.dt) for k, v_ in terms.items()}
@@ -391,5 +437,5 @@ class WalkEnv(gym.Env):
         self.prev_action = a
         info = {"terms": terms, "vx": float(v[0]), "force": force.copy(),
                 "planted": feet.copy(), "foot_pos": d.xpos[self.feet].copy(),
-                "air_td": air_td[touchdown].tolist()}
+                "air_td": air_td[touchdown].tolist(), "stall_time": float(t_stall)}
         return self._obs(), reward, terminated, truncated, info
