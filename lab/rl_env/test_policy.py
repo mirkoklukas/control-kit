@@ -1,23 +1,32 @@
 """Policy test: learn to walk forward on the floor with PPO (stable-baselines3, CPU).
 
 A runkit ``Experiment`` with three roles -- ``run`` (train), ``eval`` (one
-deterministic episode of the checkpoint) and ``viz`` (summary of a run):
+deterministic episode of a checkpoint) and ``viz`` (summary of a run):
 
     uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy steps=10e6 --tag=gait
-    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy eval        # latest ok run
+    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy --branch 2cc9 steps=15e6  # continue
+    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy eval        # latest checkpoint
     uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy eval 2cc9   # run by id prefix
     uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy viz         # latest run
     uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy bench       # env steps/s vs n_envs
-    uv run --extra mjx ctk play runs/test_policy/latest/out/eval/rollout.npz
+    uv run --extra mjx ctk play runs/test_policy/latest/checkpoints/current/eval/rollout.npz
 
 Or through runkit, which takes the extras (mjx, sb3) and the runs root from
 ``lab/rl_env/experiment.toml`` and relaunches under ``uv run`` itself (from the
 repo root; ``bench`` stays ``python -m``):
 
     runkit run  lab.rl_env.test_policy steps=10e6 --tag=gait
+    runkit run  lab.rl_env.test_policy --branch 2cc9 steps=15e6 env.w_support=10
     runkit eval lab.rl_env.test_policy
+    runkit eval runs/test_policy/latest/checkpoints/current              # no module needed
     runkit viz  lab.rl_env.test_policy
     cd "$(runkit latest lab.rl_env.test_policy)"                           # the latest run dir
+
+Branching (``--branch RUN[:CHECKPOINT]``): a new run that continues from a
+checkpoint -- the weights, the optimizer, the normalization stats and the step
+count, so the reward schedule goes on where it was. Its config is the parent's
+with the command line on top; ``steps`` is the total to reach, counted from the
+start of the parent (``steps=15e6`` continues a 10M run by 5M).
 
 Run dirs: ``{root}/test_policy/{date}_{time}_{hex8}[_{tag}]/`` (root from
 ``--root``, else ``experiment.toml``, else ``./runs``). runkit's records at the top
@@ -25,39 +34,45 @@ level (``status.yaml`` carries ``progress`` / ``total`` and the latest checkpoin
 plus what runkit writes when asked, plus this experiment's own files under ``out/``:
 
     checkpoints/current/                  every 20 PPO iterations and at the end, replacing
-      model.zip, vecnormalize.pkl         the previous one (runkit's ctx.checkpoint;
-                                          without a name: numbered ones); checkpoint.yaml
-                                          info: it, steps, ep_return, vx
+      checkpoint.yaml                     the previous one (runkit's ctx.checkpoint; without
+                                          a name: numbered ones); info: it, steps, ep_return, vx
+      state/model.zip, vecnormalize.pkl   what a branch continues from
+      state/config.yaml                   the config training ran with at that step (the
+                                          schedule evaluated there)
+      eval/eval.yaml                      an eval of this checkpoint: summary, ...
+      eval/eval.jsonl                     ... the same as a row per eval ...
+      eval/rollout.npz, rollout.xml       ... its replay, and gait.txt; replaced with the
+                                          checkpoint
     metrics/run.jsonl                     one row per PPO iteration: the values to watch
                                           (it, steps, fps, ep_return, ep_len, vx, duty, air_s)
     metrics/reward.jsonl                  the reward terms, one row per PPO iteration
-    metrics/eval.jsonl                    one row per eval (ctx.record("eval", ...))
     metrics/schedule.jsonl                the scheduled env values pushed to the envs, one
                                           row at the start and one per PPO iteration
     out/progress.png                      training curve, from metrics/run.jsonl
-    out/eval/eval.yaml                    latest eval summary
-    out/eval/rollout.npz, rollout.xml     its replay
+    (older runs: model.zip at the checkpoint's top, the eval in out/eval/ and
+    metrics/eval.jsonl)
 
 Config: :class:`PolicyCfg` = the robot model (``model.*``, :class:`.config.ModelCfg`
 with ``pad_cells`` defaulting to 1), the env's task / reward / curriculum (``env.*``,
 :class:`.config.WalkEnvCfg`), ``steps`` / ``n_envs``, and ``seed`` (a fresh random
 seed per run, recorded in ``config.yaml``; ``seed=<n>`` repeats a run). E.g. ``steps=5e6
 env.w_air=15 model.kp=12``. ``run`` takes ``key=value`` overrides and
-``--tag`` / ``--root``; ``eval`` and ``viz`` use the run's own ``config.yaml``.
+``--tag`` / ``--root`` / ``--branch``; ``eval`` and ``viz`` use the run's own
+``config.yaml``.
 ``bench`` is not a runkit role (no run dir); it is dispatched here, before runkit.
 
 Environment, observation, action and reward: :mod:`.env` (:class:`WalkEnv`).
 
-Progress: one line per PPO iteration in the terminal (steps, fps, episode return
-and length, forward speed, duty, air time and the per-term reward breakdown); the same
-run values go to ``metrics/run.jsonl`` and the reward terms to ``metrics/reward.jsonl``,
-plotted to ``out/progress.png`` at every checkpoint. The
-scheduled values pushed to the envs go to ``metrics/schedule.jsonl``.
+Progress: no prints; runkit's ``ctx.progress`` / ``ctx.record`` only. Per PPO iteration,
+steps, fps, episode return and length, forward speed, duty and air time go to
+``metrics/run.jsonl`` and the reward terms (named by the env's ``info["terms"]``) to ``metrics/reward.jsonl``,
+plotted to ``out/progress.png`` at every checkpoint. The scheduled values pushed to the
+envs go to ``metrics/schedule.jsonl``.
 
 Reward schedule: ``PolicyCfg._schedule`` (see :mod:`.scheduled_config`). Once per PPO
 iteration the progress callback evaluates it at the current step and pushes the
-resulting env config into every env; envs start with the schedule at step 0. eval uses
-the full-strength ``env`` config.
+resulting env config into every env; envs start with the schedule at step 0 (a branch:
+at its checkpoint's step). eval uses the full-strength ``env`` config.
 """
 
 import dataclasses
@@ -68,15 +83,18 @@ from pathlib import Path
 
 import numpy as np
 
-from runkit import Experiment, RunContext, load_metrics, random_seed
+from runkit import (Checkpoint, Experiment, RunContext, load_config, load_metrics,
+                    random_seed, record, save_config)
 
 from .config import ModelCfg, WalkEnvCfg
-from .env import TERMS, WalkEnv
+from . import gait
+from .env import WalkEnv
 from .model import build
 from .scheduled_config import ScheduledConfig, geometric, linear, scale, schedule
 
 REPO = Path(__file__).resolve().parents[2]
-N_STEPS = 1024      # PPO rollout length per env and iteration
+N_STEPS = [512, 1024][1];      # PPO rollout length per env and iteration
+BATCH_SIZE = [3072, 4096][1]; # We recommend using a `batch_size` that is a factor of `n_steps * n_envs`.
 
 
 # The default reward schedule (``PolicyCfg._schedule``), in training env steps.
@@ -154,16 +172,15 @@ def _plot(rows: list[dict], png_path: Path, *, reward_rows: list[dict] = (),
     if cmd_vx is not None:
         ax[1, 0].axhline(float(cmd_vx), ls="--", c="k", lw=1, label="commanded")
     ax[1, 0].set(title="forward speed", ylabel="body x velocity (m/s)"); ax[1, 0].legend()
-    if reward_rows:                              # the reward stream
+    if reward_rows:                              # the reward stream: every key but these
         xr = np.array([float(r["steps"]) for r in reward_rows]) / 1e6
-        for k in TERMS:
-            if k in reward_rows[0]:
+        for k in reward_rows[0]:
+            if k not in ("it", "steps") and not k.startswith("_"):
                 ax[1, 1].plot(xr, [float(r[k]) for r in reward_rows], label=k, lw=1)
-    else:                                        # older runs: the terms in the run rows
-        for k in TERMS:
-            key = f"reward/{k}" if f"reward/{k}" in rows[0] else k
-            if key in rows[0]:
-                ax[1, 1].plot(x, col(key), label=k, lw=1)
+    else:                                        # older runs: "reward/<k>" in the run rows
+        for key in rows[0]:
+            if key.startswith("reward/"):
+                ax[1, 1].plot(x, col(key), label=key.removeprefix("reward/"), lw=1)
     ax[1, 1].set(title="reward terms", ylabel="reward per policy step (mean)"); ax[1, 1].legend(fontsize=7, ncol=2)
     if "duty" in rows[0]:
         ax[2, 0].plot(x, col("duty"))
@@ -185,30 +202,48 @@ def _plot(rows: list[dict], png_path: Path, *, reward_rows: list[dict] = (),
 exp = Experiment("test_policy")
 
 @exp.run
-def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
+def train(cfg: PolicyCfg, ctx: RunContext, branch: Checkpoint | None = None) -> dict:
     """PPO on :class:`WalkEnv`. Checkpoints, progress and metrics through runkit
     (``ctx.checkpoint`` / ``ctx.progress`` / ``ctx.record``), the curve into
-    ``out/``. Returns the last progress row (the run's summary)."""
+    ``out/``. Returns the last progress row (the run's summary).
+
+    ``branch``: the checkpoint to continue from (``--branch``), else None. Its
+    ``state/`` has the model (weights and optimizer) and the normalization stats,
+    its ``info`` the iteration and step count -- the schedule continues there.
+    ``cfg.steps`` stays the total, counted from the parent's start."""
     from stable_baselines3 import PPO
     from stable_baselines3.common.callbacks import BaseCallback
     from stable_baselines3.common.vec_env import SubprocVecEnv, VecNormalize
     import torch
-    
+
     run_dir = ctx.out
+    start = int(branch.info["steps"]) if branch else 0          # env steps so far
+    start_it = int(branch.info["it"]) if branch else 0          # PPO iterations so far
+    if start >= cfg.steps:
+        raise SystemExit(f"the checkpoint is at {start:,} steps, steps={cfg.steps:,}: "
+                         f"nothing to train -- pass a larger total, e.g. steps={2 * start}")
     # PPO runs whole iterations of n_envs x n_steps, so it overshoots `steps` up to
     # the next multiple; that multiple is the honest total
     per_iter = cfg.n_envs * N_STEPS
-    ctx.progress(total=-(-cfg.steps // per_iter) * per_iter)   # status.yaml: 0 of total
+    ctx.progress(start, total=start + -(-(cfg.steps - start) // per_iter) * per_iter)
 
     n_envs = cfg.n_envs
-    venv = VecNormalize(SubprocVecEnv([make_env(cfg, s) for s in range(n_envs)]),
-                        norm_obs=True, norm_reward=True, clip_obs=10.0)
-    model = PPO(
-        "MlpPolicy", venv, n_steps=N_STEPS, batch_size=4096, n_epochs=5, learning_rate=3e-4,
-        gamma=0.99, gae_lambda=0.95, clip_range=0.2, ent_coef=0.005, max_grad_norm=1.0,
-        policy_kwargs=dict(net_arch=dict(pi=[256, 128], vf=[256, 128]),
-                           activation_fn=torch.nn.Tanh, log_std_init=-1.0),
-        verbose=0, device="cpu", seed=cfg.seed)
+    envs = SubprocVecEnv([make_env(cfg, s, step=start) for s in range(n_envs)])
+    if branch:
+        # the parent's running obs / reward statistics, and its model: weights,
+        # Adam moments, num_timesteps; the hyperparameters are the parent's too
+        venv = VecNormalize.load(str(branch.state / "vecnormalize.pkl"), envs)
+        venv.training, venv.norm_reward = True, True
+        model = PPO.load(branch.state / "model.zip", env=venv, device="cpu")
+        model.set_random_seed(cfg.seed)
+    else:
+        venv = VecNormalize(envs, norm_obs=True, norm_reward=True, clip_obs=10.0)
+        model = PPO(
+            "MlpPolicy", venv, n_steps=N_STEPS, batch_size=BATCH_SIZE, n_epochs=5, learning_rate=3e-4,
+            gamma=0.99, gae_lambda=0.95, clip_range=0.2, ent_coef=0.005, max_grad_norm=1.0,
+            policy_kwargs=dict(net_arch=dict(pi=[256, 128], vf=[256, 128]),
+                               activation_fn=torch.nn.Tanh, log_std_init=-1.0),
+            verbose=0, device="cpu", seed=cfg.seed)
 
     schedule = ScheduledConfig(cfg)            # validated here: a bad key fails before training
 
@@ -217,16 +252,11 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
         checkpoints."""
 
         def _on_training_start(self):
-            self.t0, self.it = time.time(), 0
-            self.rows = []                     # all run rows, for the curve
-            self.reward_rows = []              # all reward rows, for the curve
+            self.t0, self.it = time.time(), start_it
+            self.rows = []                     # this run's rows, for the curve
+            self.reward_rows = []              # this run's reward rows, for the curve
             self._reset_acc()
-            self._push(schedule(0))            # the envs were built with it; recorded
-            print(f"{n_envs} envs x {model.n_steps} "
-                  f"steps/iter | policy dt {venv.get_attr('dt')[0]:.3f}s", flush=True)
-            print(f"{'it':>4} {'steps':>9} {'fps':>6} {'return':>7} {'len':>5} {'vx':>6} "
-                  f"{'duty':>5} {'air_s':>5}  "
-                  + " ".join(f"{k[:6]:>6}" for k in TERMS), flush=True)
+            self._push(schedule(start))        # the envs were built with it; recorded
 
         def _push(self, new_cfg):
             """Push ``new_cfg.env`` into every env and record its scheduled values in
@@ -239,15 +269,17 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
                           for e in schedule.entries})
 
         def _reset_acc(self):
-            self.acc = {k: 0.0 for k in TERMS}
+            self.acc = {}                      # term -> sum; names from the env's info
             self.vx, self.n, self.planted, self.air = 0.0, 0, 0.0, []
+            self.supported = 0                 # steps with >= min_support feet planted
 
         def _on_step(self):
             for info in self.locals["infos"]:
                 for k, v in info["terms"].items():
-                    self.acc[k] += v
+                    self.acc[k] = self.acc.get(k, 0.0) + v
                 self.vx += info["vx"]
                 self.planted += float(np.mean(info["planted"]))
+                self.supported += int(np.sum(info["planted"]) >= cfg.env.min_support)
                 self.air += info["air_td"]
                 self.n += 1
             return True
@@ -256,12 +288,17 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
             self.it += 1
             ep = [e["r"] for e in model.ep_info_buffer]
             el = [e["l"] for e in model.ep_info_buffer]
-            row = {"it": self.it, "steps": self.num_timesteps,
-                   "fps": int(self.num_timesteps / (time.time() - self.t0)),
-                   "ep_return": float(np.mean(ep)) if ep else 0.0,
-                   "ep_len": float(np.mean(el)) if el else 0.0,
-                   "vx": self.vx / max(self.n, 1), "duty": self.planted / max(self.n, 1),
-                   "air_s": float(np.mean(self.air)) if self.air else 0.0}
+            row = {
+                "it": self.it, "steps": self.num_timesteps,
+                "fps": int((self.num_timesteps - start) / (time.time() - self.t0)),
+                "ep_return": float(np.mean(ep)) if ep else 0.0,
+                "ep_len": float(np.mean(el)) if el else 0.0,
+                "vx": self.vx / max(self.n, 1), 
+                "duty": self.planted / max(self.n, 1),
+                # fraction of steps with >= min_support feet planted (1 for a crawl)
+                "support": self.supported / max(self.n, 1),
+                "air_s": float(np.mean(self.air)) if self.air else 0.0,
+            }
             # run: the few values to watch training by; the reward terms (mean per
             # policy step, times dt) go to a stream of their own
             terms = {k: v / max(self.n, 1) for k, v in self.acc.items()}
@@ -271,9 +308,6 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
             ctx.progress(self.num_timesteps)   # status.yaml
             self.rows.append(row)
             self.last = row
-            print(f"{row['it']:4d} {row['steps']:9d} {row['fps']:6d} {row['ep_return']:7.2f} "
-                  f"{row['ep_len']:5.0f} {row['vx']:6.3f} {row['duty']:5.2f} {row['air_s']:5.2f}  "
-                  + " ".join(f"{terms[k]:6.3f}" for k in TERMS), flush=True)
             self._reset_acc()
             # reward schedule: the env config for the next rollout
             self._push(schedule(self.num_timesteps))
@@ -290,10 +324,14 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
             # the block exits, the previous one is removed only then. ctx.checkpoint()
             # without a name gives numbered ones: checkpoints/000001/, 000002/, ...
             with ctx.checkpoint("current") as ckpt:
-                model.save(ckpt.dir / "model.zip")
-                venv.save(str(ckpt.dir / "vecnormalize.pkl"))
+                # state/: what a branch continues from (see train's `branch`)
+                model.save(ckpt.state / "model.zip")
+                venv.save(str(ckpt.state / "vecnormalize.pkl"))
+                # the config training ran with at this step (the schedule evaluated
+                # there): for reading, not needed to continue -- a branch
+                # re-evaluates the schedule from `steps`
+                save_config(schedule(self.num_timesteps), ckpt.state / "config.yaml")
                 last = getattr(self, "last", {})
-                # the schedule is a function of `steps`: resuming evaluates it there
                 ckpt.info.update(it=self.it, steps=self.num_timesteps,
                                  **{k: last[k] for k in ("ep_return", "vx") if k in last})
             _plot(self.rows, run_dir / "progress.png", reward_rows=self.reward_rows,
@@ -303,9 +341,11 @@ def train(cfg: PolicyCfg, ctx: RunContext) -> dict:
             self._checkpoint()          # CHECKPOINT SCHEDULE (2/2): the final one
 
     progress = Progress()
-    model.learn(total_timesteps=cfg.steps, callback=progress)
+    # a branch: num_timesteps goes on from the checkpoint's (reset_num_timesteps=False
+    # adds total_timesteps to it), so the schedule and the step axis continue
+    model.learn(total_timesteps=cfg.steps - start, callback=progress,
+                reset_num_timesteps=not branch)
     venv.close()
-    print(f"done: {_rel(ctx.dir)} (checkpoints/, metrics/run.jsonl, out/progress.png)")
     last = getattr(progress, "last", {})
     return {k: last[k] for k in ("steps", "ep_return", "ep_len", "vx", "duty", "air_s") if k in last}
 
@@ -322,44 +362,45 @@ def _rel(p: Path) -> str:
 
 
 @exp.eval
-def evaluate(cfg: PolicyCfg, ctx: RunContext) -> dict:
-    """One deterministic episode of the run's latest checkpoint, reset with the run's seed.
+def evaluate(ckpt: Checkpoint) -> dict:
+    """One deterministic episode of a checkpoint (by default the latest run's
+    latest), reset with the run's seed, with the full-strength ``env`` config (the
+    run's ``config.yaml``, not the schedule at the checkpoint's step).
 
-    Writes ``out/eval/eval.yaml`` (summary) and ``out/eval/rollout.npz`` + ``.xml``
-    (replay), and records the summary to ``metrics/eval.jsonl``.
+    Writes into the checkpoint's ``eval/``: ``eval.yaml`` (summary), ``eval.jsonl``
+    (the summary as a row per eval), ``rollout.npz`` + ``.xml`` (replay) and
+    ``gait.txt``. Saving the checkpoint again (``current``) empties it.
     """
     import yaml
     from stable_baselines3 import PPO
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
-    ckpts = ctx.checkpoints()                        # complete ones, oldest first
-    if not ckpts:
-        raise SystemExit(f"{_rel(ctx.dir)}: no checkpoint yet")
-    ckpt = ckpts[-1]
-    eval_dir = ctx.out / "eval"
-    eval_dir.mkdir(exist_ok=True)
+    cfg = load_config(PolicyCfg, ckpt.run / "config.yaml")
+    eval_dir = ckpt.eval
 
-    venv = VecNormalize.load(str(ckpt.dir / "vecnormalize.pkl"),
+    venv = VecNormalize.load(str(ckpt.state / "vecnormalize.pkl"),
                              DummyVecEnv([lambda: WalkEnv(cfg.model, cfg.env, cfg.seed)]))
     venv.training, venv.norm_reward = False, False
-    model = PPO.load(ckpt.dir / "model.zip", device="cpu")
+    model = PPO.load(ckpt.state / "model.zip", device="cpu")
+    # step the env itself, the VecNormalize only normalizes observations: a vec env
+    # resets on done, so the last frame logged from it would be the reset state
     env = venv.venv.envs[0]
-    obs = venv.reset()
-    log = {k: [] for k in ("qpos", "qvel", "ctrl", "force")}
+    obs, _ = env.reset()
+    log = {k: [] for k in ("qpos", "qvel", "ctrl", "force", "planted", "foot_pos")}
     ret, vx = 0.0, []
     for _ in range(env.max_steps):
-        act, _ = model.predict(obs, deterministic=True)
-        obs, r, done, info = venv.step(act)
+        act, _ = model.predict(venv.normalize_obs(obs), deterministic=True)
+        obs, r, terminated, truncated, info = env.step(act)
         d = env.data
         for k, v in (("qpos", d.qpos), ("qvel", d.qvel), ("ctrl", d.ctrl)):
             log[k].append(np.copy(v))
-        log["force"].append(info[0]["force"])
-        ret += float(venv.get_original_reward()[0]); vx.append(info[0]["vx"])
-        if done[0]:
+        for k in ("force", "planted", "foot_pos"):
+            log[k].append(info[k])
+        ret += float(r); vx.append(info["vx"])
+        if terminated or truncated:
             break
     T = len(log["qpos"])
-    F = np.asarray(log["force"])
-    planted = F > cfg.env.contact_force_min
+    planted = np.asarray(log["planted"])             # the env's: loaded and pad flat
     summary = {
         "checkpoint": ckpt.name, "checkpoint_steps": ckpt.info.get("steps"),
         "steps": T, "seconds": round(T * env.dt, 3), "full_length": T >= env.max_steps,
@@ -373,9 +414,14 @@ def evaluate(cfg: PolicyCfg, ctx: RunContext) -> dict:
           f"{'full length' if summary['full_length'] else 'terminated'}")
     print(f"gait: duty per foot {summary['duty']}, <{cfg.env.min_support} feet planted "
           f"{100 * summary['below_min_support']:.0f}% of steps")
+    # gait diagrams, both layouts: to the terminal and eval/gait.txt
+    strip = gait.strips(planted, env.dt, min_support=cfg.env.min_support)
+    table = gait.rows(planted, env.dt, seconds=2.0, min_support=cfg.env.min_support)
+    print(f"\n{strip}\n\nfirst 2 s, one row per step:\n{table}\n")
+    (eval_dir / "gait.txt").write_text(f"{strip}\n\n{gait.rows(planted, env.dt, min_support=cfg.env.min_support)}\n")
 
     print(f"checkpoint: {ckpt.name} ({ckpt.info.get('steps')} training steps)")
-    ctx.record("eval", **summary)                    # metrics/eval.jsonl
+    record(eval_dir / "eval.jsonl", **summary)       # a row per eval of this checkpoint
     (eval_dir / "eval.yaml").write_text(yaml.safe_dump(summary, sort_keys=False))
     xml = eval_dir / "rollout.xml"
     spec, _ = build(cfg.model, write=False)
@@ -416,14 +462,20 @@ def show(cfg: PolicyCfg, ctx: RunContext) -> None:
             print(f"curve    {_rel(out / 'progress.png')}")
     else:
         print("progress none yet")
-    ev = out / "eval" / "eval.yaml"
-    if ev.exists():
-        e = yaml.safe_load(ev.read_text())
+    # the eval of the latest checkpoint; older runs kept it in out/eval/
+    ckpts = ctx.checkpoints()
+    eval_dir = ckpts[-1].eval if ckpts else None
+    if eval_dir is None or not (eval_dir / "eval.yaml").exists():
+        eval_dir = out / "eval" if (out / "eval" / "eval.yaml").exists() else None
+    if eval_dir is not None:
+        e = yaml.safe_load((eval_dir / "eval.yaml").read_text())
         print(f"eval     vx {e['vx']} (cmd {e['cmd_vx']}), distance {e['distance']} m, "
               f"duty {e['duty']}, return {e['return']}")
-        print(f"replay   uv run --extra mjx ctk play {_rel(out / 'eval' / 'rollout.npz')}")
+        print(f"replay   uv run --extra mjx ctk play {_rel(eval_dir / 'rollout.npz')}")
+    elif ckpts:
+        print(f"eval     none yet -- runkit eval {_rel(ckpts[-1].dir)}")
     else:
-        print(f"eval     none yet -- python -m lab.rl_env.test_policy eval {ctx.id.split('_')[-1]}")
+        print("eval     none yet -- no checkpoint to evaluate")
 
 
 def bench(cfg: PolicyCfg, secs: float = 5.0) -> None:

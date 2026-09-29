@@ -38,7 +38,8 @@ evaluates a :class:`.scheduled_config.ScheduledConfig` and sets ``cfg`` via
 it (command vector, angle thresholds).
 
 Contact history: the env keeps the last ``contact_history`` policy steps of each
-foot's pad normal force (``force_hist``), and per-foot timers (``air_time``,
+foot's pad normal force (``force_hist``), planted state (``planted_hist``) and world
+position (``foot_pos_hist``, ankle pivot), and per-foot timers (``air_time``,
 ``planted_time``); a foot is planted when it carries more than ``contact_force_min``
 *and* its pad lies flat (tilt within ``pad_tilt_max_deg``), and touching above
 ``contact_touch_min``. Touching but not planted (light, or on a tilted pad): the drag
@@ -65,11 +66,6 @@ import numpy as np
 from . import rewards as rw
 from .config import ModelCfg, WalkEnvCfg
 from .model import adhesion_actuators, build, pad_cell_bodies
-
-# Names of the reward terms, in the order they are logged (progress lines, CSV).
-TERMS = ("lin", "yaw", "air", "torque", "action_rate", "joint_speed", "orient", "height",
-         "clear", "drag", "slip", "ankle", "support", "term")
-
 
 class WalkEnv(gym.Env):
     """The spider on the floor, tracking a forward velocity. See the module docstring.
@@ -146,8 +142,10 @@ class WalkEnv(gym.Env):
         self.prev_action = np.zeros(12)    # last action, for the action-rate cost and obs
         self.steps = 0                     # policy steps in this episode
         # contact history: the last `contact_history` policy steps of per-foot pad normal
-        # force (N, oldest first), and per-foot timers derived from it
+        # force (N, oldest first), planted state and position, and per-foot timers
         self.force_hist = np.zeros((cfg.contact_history, 4))
+        self.planted_hist = np.zeros((cfg.contact_history, 4), bool)
+        self.foot_pos_hist = np.zeros((cfg.contact_history, 4, 3))  # world, ankle pivots
         self.planted = np.zeros(4, bool)   # foot planted at the latest step
         self.air_time = np.zeros(4)        # time since lift-off (0 while planted), s
         self.planted_time = np.zeros(4)    # time since touchdown (0 while in the air), s
@@ -243,7 +241,8 @@ class WalkEnv(gym.Env):
         return (force > self.cfg.contact_force_min) & self._pad_flat()
 
     def _update_contact_history(self, force):
-        """Push this step's foot forces into the history; update the per-foot timers.
+        """Push this step's foot forces, planted states and positions into the history;
+        update the per-foot timers.
 
         Args:
             force: (4,) per-foot pad normal force this step (N).
@@ -259,6 +258,10 @@ class WalkEnv(gym.Env):
         self.force_hist[-1] = force
 
         planted = self._planted(force)
+        self.planted_hist = np.roll(self.planted_hist, -1, axis=0)
+        self.planted_hist[-1] = planted
+        self.foot_pos_hist = np.roll(self.foot_pos_hist, -1, axis=0)
+        self.foot_pos_hist[-1] = self.data.xpos[self.feet]
         touchdown = planted & ~self.planted                       # was in the air, now planted
         air_td = np.where(touchdown, self.air_time, 0.0)          # air time read before reset
         self.air_time = np.where(planted, 0.0, self.air_time + self.dt)
@@ -308,6 +311,8 @@ class WalkEnv(gym.Env):
         # so feet already on the ground don't count as a touchdown on the first step.
         force, _ = self._contact_state()
         self.force_hist = np.zeros((self.cfg.contact_history, 4))
+        self.planted_hist = np.zeros((self.cfg.contact_history, 4), bool)
+        self.foot_pos_hist = np.zeros((self.cfg.contact_history, 4, 3))
         self.planted = self._planted(force)
         self.air_time, self.planted_time = np.zeros(4), np.zeros(4)
         return self._obs(), {}
@@ -323,7 +328,8 @@ class WalkEnv(gym.Env):
             ``(observation, reward, terminated, truncated, info)``. ``info`` carries
             ``terms`` (each reward term, already times dt), ``vx`` (forward speed,
             body frame), ``force`` (per-foot normal force), ``planted`` (per-foot
-            bool) and ``air_td`` (air times of this step's touchdowns), for logging.
+            bool), ``foot_pos`` ((4, 3) world positions of the ankle pivots) and
+            ``air_td`` (air times of this step's touchdowns), for logging.
         """
         cfg, m, d = self.cfg, self.model, self.data
 
@@ -384,5 +390,6 @@ class WalkEnv(gym.Env):
 
         self.prev_action = a
         info = {"terms": terms, "vx": float(v[0]), "force": force.copy(),
-                "planted": feet.copy(), "air_td": air_td[touchdown].tolist()}
+                "planted": feet.copy(), "foot_pos": d.xpos[self.feet].copy(),
+                "air_td": air_td[touchdown].tolist()}
         return self._obs(), reward, terminated, truncated, info

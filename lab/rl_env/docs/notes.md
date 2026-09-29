@@ -17,10 +17,11 @@ uv run --extra mjx python -m lab.rl_env.test_tilt test=sweep tilt_deg=180    # t
 uv run --extra mjx python -m lab.rl_env.test_tilt model.ankle_range_deg=45 model.kp=30   # nested fields: dotted keys
 uv run --extra mjx python -m lab.rl_env.test_foot                            # foot pull test, a row of fixtures
 uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy steps=10e6 --tag=gait    # PPO walk forward (runkit run)
-uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy eval [<id prefix>]       # latest ok run -> out/eval/
+uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy --branch <id prefix> steps=15e6   # continue a run
+uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy eval [<id prefix>]       # latest checkpoint -> its eval/
 uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy viz [<id prefix>]        # summary of a run
 uv run --extra mjx ctk play runs/rl_env/test_tilt_hold-90.npz               # replay a test (relaunches under mjpython)
-uv run --extra mjx ctk play runs/test_policy/latest/out/eval/rollout.npz     # replay the latest policy eval
+uv run --extra mjx ctk play runs/test_policy/latest/checkpoints/current/eval/rollout.npz   # replay the latest policy eval
 ```
 
 Outputs: `runs/rl_env/test_<name>[_<params>].npz` (e.g. `test_tilt_hold-90.npz`,
@@ -64,13 +65,18 @@ Also written on every build: `lab/rl_env/models/scene_flat.xml` (inspection copy
   `model` + `env` + steps, n_envs, `seed`; `config.yaml` is nested). Uses runkit's
   run-time API: `seed = random_seed()` (fresh per run, recorded; `seed=<n>` repeats a
   run exactly -- checked), `ctx.checkpoint("current")` every 20 PPO iterations + at the end,
-  replacing the previous one to save disk (`checkpoints/current/` with model.zip,
-  vecnormalize.pkl, checkpoint.yaml info: it, steps, k_c, ep_return, vx; ~1.2 MB;
+  replacing the previous one to save disk (`checkpoints/current/` with `state/`: model.zip,
+  vecnormalize.pkl, config.yaml (the scheduled config at that step); checkpoint.yaml
+  info: it, steps, ep_return, vx; ~1.2 MB;
   `ctx.checkpoint()` without a name gives numbered ones, ~40 per 10M-step run), `ctx.progress`
   (steps in status.yaml, total rounded up to whole PPO iterations), `ctx.record` (one
-  row per iteration in `metrics/run.jsonl`; eval rows in `metrics/eval.jsonl`). The
-  body's own files under `out/`: `progress.png`, `eval/eval.yaml`, `eval/rollout.npz`.
-  eval uses the latest checkpoint and the run's seed. `bench` stays outside runkit.
+  row per iteration in `metrics/run.jsonl`). The body's own files under `out/`:
+  `progress.png`. eval takes a checkpoint (`evaluate(ckpt)`; default the latest run's
+  latest), with the run's seed and full-strength config, and writes into its `eval/`:
+  `eval.yaml`, `eval.jsonl`, `rollout.npz`, `gait.txt` -- emptied when the checkpoint is
+  saved again. `--branch` continues a run from a checkpoint (weights, optimizer,
+  normalization, step count; the schedule goes on). Older runs: model.zip at the
+  checkpoint's top, the eval in `out/eval/`. `bench` stays outside runkit.
 - `test_foot.py` — foot pull test: one scene, a row of fixtures (locked / free / rigid
   carriage + tibia + real foot), force ramp until release. Own runner; its docstring
   describes every section.

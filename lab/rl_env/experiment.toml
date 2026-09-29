@@ -4,7 +4,7 @@
 # Machine differences (GPU wheels) live in pyproject.toml's markers, not here.
 
 [env]
-root = "./runs"            # <repo>/runs, whichever folder you launch from
+root = "./runs"            # lab/rl_env/runs (relative to this file), from any folder
 extras = ["mjx"]               # MuJoCo / JAX: model.py imports jax
 
 [env.test_policy]

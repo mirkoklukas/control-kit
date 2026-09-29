@@ -64,15 +64,18 @@ env:
   w_orient: 0.4
   w_height: 50.0
   w_clear: 100.0
-  w_slip: 5.0
-  w_drag: 2.0
+  w_slip: 30.0           # bd35df55 at 5: two feet barely stepped and were slid along instead;
+                         # b46f0f04 at 10 (w_support 15): two feet never lifted, slid along
+  w_drag: 10.0           # sliding feet that are lightly loaded count as drag, not slip
   w_ankle: 5.0
   w_air: 20.0
-  w_support: 2.0
+  w_support: 15.0        # ee9b300d at 2: 0.3 feet short on average (trot-ish overlap);
+                         # f8a32a8e at 6: diagonal pairs overlap, <3 planted 10% of steps
   w_term: 50.0
   clear_height: 0.06
   ankle_safe_deg: 30.0
-  air_target: 0.25
+  air_target: 0.15       # bd35df55 at 0.25: steps averaged 0.18 s, so every touchdown cost
+                         # and the cheapest foot was one that never stepped
   air_max: 0.3
   min_support: 3
   contact_force_min: 1.0
@@ -80,7 +83,7 @@ env:
   pad_tilt_max_deg: 3.0
   contact_history: 100
   tip_deg: 60.0
-steps: 10000000
+steps: 15000000          # ee9b300d was still improving at 10M
 n_envs: 12
 _schedule:
   enabled: true
@@ -149,4 +152,4 @@ _schedule:
       op: scale
       kind: linear
       start: 500000
-      length: 2000000
+      length: 4000000      # slower ramp to the higher weight: ~2 at 1.8M, as before

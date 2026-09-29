@@ -228,12 +228,18 @@ A foot is attached when its magnet is on, the switch has finished, and all N\_c 
 ### Minimum support
 
 $$
-C_{support} = \mathbb{1}\left[\, n_{attached} < 3 \,\right]
+C_{support} = \max\left(0,\; n_{min} - n_{planted}\right), \qquad n_{min} = 3
 $$
 
-**Weight:** 20 (cost, start) · source: new
+**Weight:** 5 (cost; 2 in `configs/crawl.yaml`) · scheduled: 0 until 500k training steps, then linearly to full over 2M · source: new
 
 At least 3 feet attached with full adhesion (α = 1) at all times. With 4 legs this forces a crawl gait on the wall: one leg moves at a time, and the next foot must attach before another detaches. Dropping below 2 attached feet terminates the episode.
+
+**In the env (floor, magnets off):** a foot counts if it is *planted*: normal force above `contact_force_min` (1 N) and pad face within `pad_tilt_max_deg` (3°) of the contact normal. On the wall this becomes "attached".
+
+**Graded, not 0/1:** one foot short costs 1, two cost 2. The original indicator treated a near-crawl (occasionally one foot short) like a trot (often two short), so it gave no gradient towards the crawl; weighted at 10–20 it made not stepping at all the cheapest option.
+
+**Ramped in:** at full strength from the start the policy never learns to step. It is off until the policy walks, then ramped in, so that a trot turns into a crawl rather than into standing. The run metric `support` (fraction of steps with ≥ n_min feet planted) shows whether it works: 1 for a crawl.
 
 ### Load margin
 
