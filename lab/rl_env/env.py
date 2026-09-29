@@ -13,10 +13,12 @@ Environment (Gymnasium):
 - Reset: ``stand`` keyframe + uniform joint noise ``reset_noise``.
 - Action (12,) in [-1, 1]: joint position targets = ``stand`` + ``action_scale`` *
   action, clipped to the joint limits, sent to the leg servos.
-- Observation (57,): gravity in the body frame (3), base linear velocity (3) and
+- Observation (77,): gravity in the body frame (3), base linear velocity (3) and
   angular velocity (3) in the body frame, joint positions relative to ``stand`` (12)
-  and velocities (12), ankle angles (8), previous action (12), command (3), time
-  behind the minimum pace as a fraction of the time to full stall cost (1), capped at 1.
+  and velocities (12), ankle angles (8), previous action (12), command (3), foot
+  (ankle pivot) positions relative to the base in the body frame (12), pad face
+  heights above the floor (4), planted flags (4), time behind the minimum pace as a
+  fraction of the time to full stall cost (1), capped at 1.
 
 Reward (docs/policy-and-reward-terms.md; the terms are pure functions in
 :mod:`.rewards`, composed in :meth:`WalkEnv.step`), every term times the policy dt:
@@ -202,7 +204,7 @@ class WalkEnv(gym.Env):
 
         # --- gym spaces ---
         self.action_space = gym.spaces.Box(-1.0, 1.0, (12,), np.float32)
-        self.observation_space = gym.spaces.Box(-np.inf, np.inf, (57,), np.float32)
+        self.observation_space = gym.spaces.Box(-np.inf, np.inf, (77,), np.float32)
 
         # --- per-episode state (set properly in reset) ---
         self._seed = seed                  # used for the first reset if none is given
@@ -255,9 +257,10 @@ class WalkEnv(gym.Env):
         return R, v_body, w_body
 
     def _obs(self):
-        """The observation (57,), float32. Layout: see the module docstring."""
+        """The observation (77,), float32. Layout: see the module docstring."""
         R, v, w = self._base_frame()
         d, cfg = self.data, self.cfg
+        foot = d.xpos[self.feet]                                  # ankle pivots, world (4, 3)
         return np.concatenate([
             R.T @ np.array([0.0, 0.0, -1.0]),                     # gravity direction, body (3)
             v, w,                                                 # base velocities, body (3 + 3)
@@ -266,6 +269,9 @@ class WalkEnv(gym.Env):
             d.qpos[self.ank_qadr],                                # ankle angles (8)
             self.prev_action,                                     # previous action (12)
             self.cmd,                                             # command (3)
+            ((foot - d.xpos[self.base]) @ R).ravel(),             # feet rel. base, body (12)
+            foot[:, 2] - self.pad_drop,                           # pad face above floor (4)
+            self.planted,                                         # planted flags (4)
             [min(self.t_behind / (cfg.stall_grace + cfg.stall_ramp), 1.0)],  # time behind (1)
         ]).astype(np.float32)
 

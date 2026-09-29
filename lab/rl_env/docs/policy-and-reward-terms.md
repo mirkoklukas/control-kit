@@ -23,7 +23,9 @@ The controller is a small MLP that maps sensor readings and a velocity command t
 - previous action
 - velocity command in the surface plane: forward, lateral, yaw
 - ankle hinge angles, 2 per foot (encoders on the passive ankle)
-- per-foot attached state (Hall sensors)
+- per-foot attached state (Hall sensors); in the floor env: planted flags
+- foot positions relative to the base, body frame (forward kinematics from the encoders)
+- pad heights above the surface (floor env). Not measured on the robot (needs the body height or a terrain estimate): a candidate for the privileged critic inputs instead
 
 **Privileged critic inputs (sim only):** adhesion fraction α per foot, pad contact forces, load margin per foot. Asymmetric actor–critic: the critic sees these, the actor only what the real robot measures.
 
@@ -191,7 +193,7 @@ $$
 C_{hard\_clear} = \sum_{i \,:\, h_i < h_{min}} \max\left(0,\; \lVert v_{t,i} \rVert - v_{tol}\right)
 $$
 
-**Weight:** 0 (cost; 20 in `configs/crawl.yaml`) · h\_min = `hard_clear_height` 1 cm, v\_tol = `hard_clear_vtol` 0.01 m/s · scheduled like slip and drag (from 0.4 of full weight) · source: new
+**Weight:** 0 (cost; 1 in `configs/crawl.yaml`) · h\_min = `hard_clear_height` 1 cm, v\_tol = `hard_clear_vtol` 0.01 m/s · scheduled like slip and drag (from 0.4 of full weight) · source: new
 
 A foot below h\_min must not move along the surface (beyond v\_tol, for settling noise), whatever its contact state: planted, touching, or skimming just above the surface. "Hard" is only the name: a step in height, no cost at or above h\_min.
 
