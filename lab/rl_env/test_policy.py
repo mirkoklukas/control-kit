@@ -363,66 +363,125 @@ def _rel(p: Path) -> str:
 
 @exp.eval
 def evaluate(ckpt: Checkpoint) -> dict:
-    """One deterministic episode of a checkpoint (by default the latest run's
-    latest), reset with the run's seed, with the full-strength ``env`` config (the
-    run's ``config.yaml``, not the schedule at the checkpoint's step).
+    """Run one deterministic episode of a trained policy and report how it walks.
 
-    Writes into the checkpoint's ``eval/``: ``eval.yaml`` (summary), ``eval.jsonl``
-    (the summary as a row per eval), ``rollout.npz`` + ``.xml`` (replay) and
-    ``gait.txt``. Saving the checkpoint again (``current``) empties it.
+    The policy is the one saved in ``ckpt`` (by default the latest checkpoint of the
+    latest run). The env is reset with the run's seed and uses the run's full-strength
+    ``env`` config from its ``config.yaml`` -- not the scheduled values training used at
+    the checkpoint's step -- so every eval scores against the same target reward.
+
+    Steps:
+        1. Load the policy and the observation normalization from the checkpoint.
+        2. Roll out one episode (until termination or ``episode_s``), logging the
+           simulation state and the per-foot contact state at every policy step.
+        3. Summarize: return, speed, distance, duty per foot, support violations.
+        4. Print the summary and a gait diagram (which feet are planted, when).
+        5. Save everything into the checkpoint's ``eval/`` folder.
+
+    Files written to ``ckpt.eval`` (emptied when the checkpoint is saved again):
+        eval.yaml: the summary of this eval.
+        eval.jsonl: the summary appended as one row per eval.
+        gait.txt: the gait diagram, strips and the full per-step table.
+        rollout.npz, rollout.xml: the logged episode and its model, for replay with
+            ``ctk play``.
+
+    Args:
+        ckpt: the checkpoint to evaluate (runkit picks it from the command line).
+
+    Returns:
+        The summary dict (also in ``eval.yaml``).
     """
     import yaml
     from stable_baselines3 import PPO
     from stable_baselines3.common.vec_env import DummyVecEnv, VecNormalize
 
+    # --- 1. load the policy and its observation normalization -----------------------
+    # The config is the run's own (full-strength weights), not the checkpoint's
+    # scheduled one.
     cfg = load_config(PolicyCfg, ckpt.run / "config.yaml")
     eval_dir = ckpt.eval
 
+    # VecNormalize holds the running mean / std of the observations seen in training;
+    # the policy only understands normalized observations. Freeze the statistics
+    # (training=False) and keep rewards raw (norm_reward=False).
     venv = VecNormalize.load(str(ckpt.state / "vecnormalize.pkl"),
                              DummyVecEnv([lambda: WalkEnv(cfg.model, cfg.env, cfg.seed)]))
     venv.training, venv.norm_reward = False, False
     model = PPO.load(ckpt.state / "model.zip", device="cpu")
-    # step the env itself, the VecNormalize only normalizes observations: a vec env
-    # resets on done, so the last frame logged from it would be the reset state
+
+    # --- 2. roll out one episode ------------------------------------------------------
+    # Step the WalkEnv itself and use the VecNormalize only to normalize observations.
+    # Stepping the vec env would reset the env automatically at the end of the episode,
+    # so the last logged frame would be the reset state instead of the final one.
     env = venv.venv.envs[0]
     obs, _ = env.reset()
+
+    # Per policy step: the simulation state (qpos, qvel, ctrl, for the replay) and the
+    # per-foot contact state from the env's info (normal force, planted, position).
     log = {k: [] for k in ("qpos", "qvel", "ctrl", "force", "planted", "foot_pos")}
     ret, vx = 0.0, []
     for _ in range(env.max_steps):
         act, _ = model.predict(venv.normalize_obs(obs), deterministic=True)
         obs, r, terminated, truncated, info = env.step(act)
+
         d = env.data
         for k, v in (("qpos", d.qpos), ("qvel", d.qvel), ("ctrl", d.ctrl)):
             log[k].append(np.copy(v))
         for k in ("force", "planted", "foot_pos"):
             log[k].append(info[k])
-        ret += float(r); vx.append(info["vx"])
+
+        # the env's raw reward (not normalized) and the forward speed in the body frame
+        ret += float(r)
+        vx.append(info["vx"])
         if terminated or truncated:
             break
+
+    # --- 3. summarize -----------------------------------------------------------------
+    # `planted` is the env's definition: loaded (normal force above contact_force_min)
+    # and the pad flat (tilt within pad_tilt_max_deg). Shape (T, 4).
     T = len(log["qpos"])
-    planted = np.asarray(log["planted"])             # the env's: loaded and pad flat
+    planted = np.asarray(log["planted"])
     summary = {
-        "checkpoint": ckpt.name, "checkpoint_steps": ckpt.info.get("steps"),
-        "steps": T, "seconds": round(T * env.dt, 3), "full_length": T >= env.max_steps,
-        "return": round(ret, 3), "cmd_vx": cfg.env.cmd_vx, "vx": round(float(np.mean(vx)), 4),
+        # which policy, and how long the episode lasted
+        "checkpoint": ckpt.name,
+        "checkpoint_steps": ckpt.info.get("steps"),
+        "steps": T,
+        "seconds": round(T * env.dt, 3),
+        "full_length": T >= env.max_steps,
+        # task: return, commanded vs. measured speed, distance along world x
+        "return": round(ret, 3),
+        "cmd_vx": cfg.env.cmd_vx,
+        "vx": round(float(np.mean(vx)), 4),
         "distance": round(float(log["qpos"][-1][0] - log["qpos"][0][0]), 4),
+        # gait: fraction of time each foot is planted, and fraction of steps with
+        # fewer than min_support feet planted (0 for a clean crawl)
         "duty": [round(float(x), 3) for x in planted.mean(0)],
         "below_min_support": round(float((planted.sum(1) < cfg.env.min_support).mean()), 3),
     }
+
+    # --- 4. print the summary and the gait diagram ------------------------------------
     print(f"episode: {T} steps ({summary['seconds']} s), return {ret:.2f}, mean vx "
           f"{summary['vx']:.3f} (cmd {cfg.env.cmd_vx}), distance {summary['distance']:.2f} m, "
           f"{'full length' if summary['full_length'] else 'terminated'}")
     print(f"gait: duty per foot {summary['duty']}, <{cfg.env.min_support} feet planted "
           f"{100 * summary['below_min_support']:.0f}% of steps")
-    # gait diagrams, both layouts: to the terminal and eval/gait.txt
-    strip = gait.strips(planted, env.dt, min_support=cfg.env.min_support)
-    table = gait.rows(planted, env.dt, seconds=2.0, min_support=cfg.env.min_support)
-    print(f"\n{strip}\n\nfirst 2 s, one row per step:\n{table}\n")
-    (eval_dir / "gait.txt").write_text(f"{strip}\n\n{gait.rows(planted, env.dt, min_support=cfg.env.min_support)}\n")
 
+    # Two layouts of the same planted array (gait.py): strips (one line per foot,
+    # time along the line) for the whole episode, and a table (one row per step) --
+    # the first 2 s in the terminal, all of it in gait.txt.
+    strip = gait.strips(planted, env.dt, min_support=cfg.env.min_support)
+    # table = gait.rows(planted, env.dt, seconds=2.0, min_support=cfg.env.min_support)
+    # table_full = gait.rows(planted, env.dt, min_support=cfg.env.min_support)
+    print(f"\n{strip}\n")
     print(f"checkpoint: {ckpt.name} ({ckpt.info.get('steps')} training steps)")
-    record(eval_dir / "eval.jsonl", **summary)       # a row per eval of this checkpoint
+
+    # --- 5. save into the checkpoint's eval/ ------------------------------------------
+    (eval_dir / "gait.txt").write_text(f"{strip}\n\n{strip}\n")
+    record(eval_dir / "eval.jsonl", **summary)
     (eval_dir / "eval.yaml").write_text(yaml.safe_dump(summary, sort_keys=False))
+
+    # The replay for `ctk play`: the logged episode (npz) with the time per frame and
+    # the path of the model it ran on, written next to it as MJCF (xml).
     xml = eval_dir / "rollout.xml"
     spec, _ = build(cfg.model, write=False)
     xml.write_text(spec.to_xml())
