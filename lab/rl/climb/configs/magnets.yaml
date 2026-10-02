@@ -1,0 +1,177 @@
+# Crawl with magnets (climb step 1): lab/rl/configs/crawl.yaml with magnets (scripted from
+# the phase clock), phase reward, 3 x 3 pad cells, obs v3. Normal gravity; < 3 attached ends the episode.
+#   runkit run lab.rl.climb.train exp:configs/magnets.yaml --tag=magnets
+# No seed: a fresh one is drawn per run (add `seed: N` to repeat a run).
+# A full copy: later changes to the defaults in code do not reach this file.
+mjmodel:
+  num_legs: 4
+  mount_radius: 0.1
+  leg_lengths:
+  - 0.05
+  - 0.15
+  - 0.2
+  joint_limits_deg:
+  - - -60
+    - 60
+  - - -100
+    - 100
+  - - -160
+    - 160
+  body_half_height: 0.03
+  link_radius: 0.012
+  nose_offset: 0.005
+  mass_body: 1.8
+  mass_links:
+  - 0.04
+  - 0.08
+  - 0.08
+  mass_pad: 0.05
+  pad_size: 0.04
+  pad_cells: 3
+  pad_thickness: 0.006
+  pivot_height: 0.005
+  ankle_range_deg: 45.0
+  ankle_stiffness: 0.05
+  ankle_damping: 0.005
+  ankle_armature: 0.0001
+  pad_friction: 0.5
+  adhesion_gain: 30.0
+  adhesion_margin: 0.002
+  kp: 10.0
+  kv: 1.0
+  forcerange:
+  - -5.0
+  - 5.0
+  joint_damping: 0.05
+  armature: 0.005
+  timestep: 0.002
+  integrator: implicitfast
+  stand_foot_radius: 0.28
+  stand_height: 0.16
+  rest_clearance: 0.002
+env:
+  cmd_vx: 0.05           # 0.1 m per step at the 2 s gait cycle
+  policy_hz: 50.0
+  episode_s: 10.0
+  action_scale: 0.3
+  reset_noise: 0.05
+  obs: v3
+  magnet_mode: clock     # magnets follow the phase clock; the policy learns the legs
+  magnet_delay_s: 0.0
+  magnet_start_on: true
+  gravity_random: false  # off for now (2026-10-02); tilt U[0, 90] when on
+  gravity_tilt_max_deg: 90.0
+  settle_s: 0.2
+  phase_period_s: 2.0    # was 1.0 (too fast): swing 0.4 s, all-stance 0.1 s between swings
+  phase_offsets: [0.5, 0.75, 0.25, 0.0]   # LF, LB, RB, RF: swing order LB, LF, RB, RF
+  duty: 0.8              # all four in stance for 0.05 of the cycle between swings
+  w_lin: 8.0             # 531c034f at 5 (with stall): settled at 0.05 m/s, lin +0.044 per
+                         # step vs slip -0.074; full speed must pay for the extra stepping
+  lin_sharpness: 40.0
+  w_yaw: 3.0
+  yaw_sharpness: 10.0      # at 1 a 0.3 rad/s error kept 98% of R_yaw (heading drifted
+                           # freely); at 10: 0.1 rad/s keeps ~79%, 0.3 rad/s ~17%
+  w_torque: 0.005
+  w_action_rate: 0.5
+  w_joint_speed: 0.03
+  w_orient: 0.4
+  w_height: 0.0          # off (2026-10-02)
+  w_clear: 100.0
+  w_slip: 30.0           # bd35df55 at 5: two feet barely stepped and were slid along instead;
+                         # b46f0f04 at 10 (w_support 15): two feet never lifted, slid along
+  w_drag: 10.0           # sliding feet that are lightly loaded count as drag, not slip
+  w_hard_clear: 0.0     # new: feet below 1 cm (skimming, not just touching) stay put
+  w_ankle: 5.0
+  w_air: 20.0
+  w_support: 0.0         # off: min_attached = 3 terminates before it could cost anything
+  w_switch: 0.0
+  w_phase: 4.0          # half of w_lin; the phase reward is in [0, 1] like the lin kernel
+  w_term: 50.0
+  clear_height: 0.06
+  hard_clear_height: 0.01
+  hard_clear_vtol: 0.01
+  ankle_safe_deg: 30.0
+  air_target: 0.4        # the clock's swing: (1 - duty) * phase_period_s
+  air_max: 0.5          # above air_target, else every touchdown costs
+  min_support: 3
+  pad_tilt_max_deg: 3.0
+  attach_cells_min: 0
+  contact_history: 100
+  tip_deg: 60.0
+  min_attached: 3        # crawl: only the swing foot may be detached
+steps: 15000000          # ee9b300d was still improving at 10M
+n_envs: 12
+_schedule:
+  enabled: true
+  env:
+    w_torque:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_action_rate:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_joint_speed:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_orient:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_height:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_clear:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_drag:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_slip:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_hard_clear:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_ankle:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_air:
+      op: scale
+      kind: geometric
+      x0: 0.4
+      rate: 0.997
+      per: 12288
+    w_support:
+      op: scale
+      kind: linear
+      start: 500000
+      length: 2500000      # full at 3M: 531c034f's support was still rising at 4M (ramp to 4.5M)

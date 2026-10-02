@@ -1,0 +1,10 @@
+# How runkit starts the experiments in this folder, read before they are imported:
+#   runkit run lab.rl.climb.train steps=10e6 --tag=magnets
+# relaunches as `uv run --project <repo> --extra mjx --extra sb3 python -m runkit ...`.
+
+[env]
+root = "./runs"            # lab/rl/climb/runs (relative to this file), from any folder
+extras = ["mjx"]           # MuJoCo / JAX: mjmodel.py imports jax
+
+[env.train]
+extras = ["mjx", "sb3"]    # + stable-baselines3 (torch) for PPO on CPU
