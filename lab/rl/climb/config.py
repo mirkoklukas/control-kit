@@ -36,6 +36,10 @@ class MjModelCfg:
     # --- foot: passive Cardan ankle + square pad (neutral: pad face _|_ tibia) ---
     pad_size: float = 0.04          # pad side length (m)
     pad_cells: int = 3              # pad = N x N cell bodies, each with its own adhesion
+    pad_cell_shape: str = "sphere"  # "sphere" (default since 2026-10-02): N x N spheres, 1
+                                    # contact each, ~3x faster, same pull-off / shear as boxes
+                                    # (test_foot); "box": N x N boxes tiling the pad (4 each)
+    pad_sphere_radius: float = 0.0  # sphere cells: radius (m); 0 -> pad_thickness / 2
     pad_thickness: float = 0.006    # (m)
     pivot_height: float = 0.005     # ankle pivot above the pad's back face (m)
     ankle_range_deg: float = 45.0   # +/- hard stop on both ankle axes

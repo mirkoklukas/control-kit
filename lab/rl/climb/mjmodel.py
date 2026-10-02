@@ -30,7 +30,8 @@ builds with no tilt and sets ``model.opt.gravity`` per episode (:func:`gravity_d
   ``Robot.to_mjcf`` (the ``<position>`` / ``<joint>`` defaults).
 - Ankle (:func:`_add_foot`): ``ankle_range_deg`` (+/- hard stop, both axes),
   ``ankle_stiffness``, ``ankle_damping``, ``ankle_armature``.
-- Pad (:func:`_add_foot`): ``pad_size``, ``pad_cells`` (N x N), ``pad_thickness``,
+- Pad (:func:`_add_foot`): ``pad_size``, ``pad_cells`` (N x N), ``pad_cell_shape`` (box /
+  sphere cells), ``pad_sphere_radius``, ``pad_thickness``,
   ``pivot_height``, ``pad_friction`` (also the floor's).
 - Adhesion (:func:`_add_foot`): ``adhesion_gain`` (N per foot at ctrl 1, split over
   the cells), ``adhesion_margin`` (pad geom margin = gap).
@@ -109,15 +110,42 @@ def _add_foot(spec: mujoco.MjSpec, cfg: MjModelCfg, i: int) -> None:
     # "foot peeling problem"). margin == gap is what we intended (contacts seen within
     # the margin, inactive until touching); in 3.9.0 gap has no effect, so the pad
     # rests ~margin above the surface (accepted).
+    #
+    # Cell shape (``pad_cell_shape``):
+    # - "box": the boxes tile the pad (face, edges and corners as in the real pad); a
+    #   box on a plane makes up to 4 contacts, so 4 N^2 per foot.
+    # - "sphere": one sphere per cell, its lowest point in the pad face; the grid spans
+    #   the whole pad (outer spheres touch its edges), so the support area matches the
+    #   box pad. 1 contact per cell, N^2 per foot. A visual-only slab shows the pad.
     n, s, t = cfg.pad_cells, cfg.pad_size, cfg.pad_thickness
-    x, w = cfg.pivot_height + 0.5 * t, s / n
+    friction = [cfg.pad_friction, 0.005, 0.0001]
+    if cfg.pad_cell_shape == "box":
+        w = s / n
+        x = cfg.pivot_height + 0.5 * t                     # box centre, along the foot x
+        offsets = [(k + 0.5) * w - 0.5 * s for k in range(n)]
+    elif cfg.pad_cell_shape == "sphere":
+        rs = cfg.pad_sphere_radius or 0.5 * t
+        x = cfg.pivot_height + t - rs                      # sphere bottom in the pad face
+        offsets = ([0.0] if n == 1 else
+                   [-0.5 * s + rs + k * (s - 2 * rs) / (n - 1) for k in range(n)])
+        pad.add_geom(type=mujoco.mjtGeom.mjGEOM_BOX, pos=[cfg.pivot_height + 0.5 * t, 0, 0],
+                     size=[0.5 * t, 0.5 * s, 0.5 * s], contype=0, conaffinity=0, mass=0,
+                     rgba=_RGBA["pad"])
+    else:
+        raise ValueError(f"pad_cell_shape: 'box' or 'sphere', not {cfg.pad_cell_shape!r}")
     for k in range(n * n):
-        dy, dz = (k // n + 0.5) * w - 0.5 * s, (k % n + 0.5) * w - 0.5 * s
+        dy, dz = offsets[k // n], offsets[k % n]
         cell = pad.add_body(name=f"pad{i}_c{k}", pos=[x, dy, dz])
-        cell.add_geom(
-            type=mujoco.mjtGeom.mjGEOM_BOX, size=[0.5 * t, 0.5 * w, 0.5 * w],
-            mass=cfg.mass_pad / n**2, friction=[cfg.pad_friction, 0.005, 0.0001],
-            margin=cfg.adhesion_margin, gap=cfg.adhesion_margin, rgba=_RGBA["pad"])
+        if cfg.pad_cell_shape == "box":
+            cell.add_geom(
+                type=mujoco.mjtGeom.mjGEOM_BOX, size=[0.5 * t, 0.5 * w, 0.5 * w],
+                mass=cfg.mass_pad / n**2, friction=friction,
+                margin=cfg.adhesion_margin, gap=cfg.adhesion_margin, rgba=_RGBA["pad"])
+        else:
+            cell.add_geom(
+                type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[rs, 0, 0],
+                mass=cfg.mass_pad / n**2, friction=friction,
+                margin=cfg.adhesion_margin, gap=cfg.adhesion_margin, rgba=_RGBA["ankle"])
         spec.add_exclude(bodyname1=f"leg{i}_2", bodyname2=f"pad{i}_c{k}")
         act = spec.add_actuator(name=f"adhere{i}_{k}", target=f"pad{i}_c{k}",
                                 trntype=mujoco.mjtTrn.mjTRN_BODY)
@@ -201,6 +229,14 @@ def add_flat_scene(spec: mujoco.MjSpec, cfg: MjModelCfg, tilt_deg: float = 0.0) 
     opt.integrator = getattr(mujoco.mjtIntegrator, f"mjINT_{cfg.integrator.upper()}")
     opt.cone = mujoco.mjtCone.mjCONE_ELLIPTIC      # recommended with adhesion
     opt.impratio = 10.0
+    # CCD for box-box pairs (trunk vs pad cell): MuJoCo Warp rejects native and
+    # multi-contact CCD together with non-zero geom margins (our pad cells), so both
+    # are off, on CPU too (the same model on both). MuJoCo 3.14 has both on by
+    # default; 3.9 had native CCD on and multi-contact off. Pad vs floor (box-plane)
+    # does not use CCD.
+    for flag in ("mjDSBL_NATIVECCD", "mjDSBL_MULTICCD"):
+        if hasattr(mujoco.mjtDisableBit, flag):
+            opt.disableflags |= getattr(mujoco.mjtDisableBit, flag)
     opt.gravity = gravity(tilt_deg)
 
     spec.add_texture(name="grid", type=mujoco.mjtTexture.mjTEXTURE_2D,
@@ -221,8 +257,8 @@ def build(cfg: MjModelCfg, *, tilt_deg: float = 0.0, write: bool = True):
     Args:
         cfg: model config.
         tilt_deg: gravity tilt about world y (0 floor, 90 wall, 180 ceiling).
-        write: also write the model XML to ``models/scene_flat.xml`` (for
-            inspection and ``ctk play``).
+        write: also write the model XML to ``models/scene_flat.xml`` (box cells) or
+            ``models/scene_flat_sphere.xml`` (sphere cells), for inspection and ``ctk play``.
 
     Returns:
         ``(spec, model)``.
@@ -238,5 +274,6 @@ def build(cfg: MjModelCfg, *, tilt_deg: float = 0.0, write: bool = True):
     model = spec.compile()
     if write:
         MODELS_DIR.mkdir(exist_ok=True)
-        (MODELS_DIR / "scene_flat.xml").write_text(spec.to_xml())
+        name = "scene_flat.xml" if cfg.pad_cell_shape == "box" else "scene_flat_sphere.xml"
+        (MODELS_DIR / name).write_text(spec.to_xml())
     return spec, model

@@ -112,6 +112,44 @@ MuJoCo Warp supports the adhesion actuator (`TrnType.BODY`); MJX-JAX does not. P
 
 Open: plan here first, or feasibility check of 1-2 on the GPU box first.
 
+Feasibility check (2026-10-02, branch `warp`, `climb/warp_check.py`, Lambda A10 24 GB):
+
+- Deps: mujoco / mujoco-mjx / mujoco-warp 3.14.0 (aligned), jax 0.6.2 (cuda12).
+- Model: builds for Warp after turning off native and multi-contact CCD (Warp rejects
+  them with non-zero geom margins; only box-box pairs, trunk vs pad cell). Set in
+  `climb/mjmodel.py` for CPU too. 3.14 has both on by default (3.9: native on).
+- Per-world gravity: works (batched `opt.gravity`, model vmapped over axis 0).
+- Parity, 2 s stand with magnets on, tilt 0 ... 180: Warp float32 = CPU float64 within
+  0.01 mm (base), 1e-4 rad (joints). No NaNs. Adhesion + elliptic cone work.
+- Throughput (world-steps/s; one control step = 10):
+
+  | setup | contacts | 1024 worlds | 4096 worlds |
+  |---|---|---|---|
+  | 3 x 3 cells, elliptic | 144 | 106k | 99k |
+  | 3 x 3, smaller buffers | 144 | 110k | 103k |
+  | 3 x 3, pyramidal | 144 | 145k | 146k |
+  | 3 x 3, 20 solver iterations | 144 | 110k | 103k |
+  | 1 cell | 16 | 814k | 1.01M |
+
+  Flat in the number of worlds: the GPU is saturated per world, by the contacts. 3 x 3
+  box cells on the A10 (~10k control steps/s) are no faster than the CPU env on the box's
+  30 cores. The contact count is the lever: sphere cells (36 contacts) next.
+
+Sphere cells (2026-10-02, CPU): `mjmodel.pad_cell_shape="sphere"` (default stays "box").
+One sphere per cell (r = pad_thickness / 2 = 3 mm), lowest point in the pad face, grid
+spanning the whole pad; visual-only slab for the pad. Model XML: `climb/models/
+scene_flat_sphere.xml` (box: `scene_flat.xml`).
+
+- `climb/test_foot.py` (copy of `lab/rl/test_foot.py`): every release force equal to box
+  cells (flat 30.6, edge 10.6, corner 4.0 N; shear, lean, free-leg cases too) with 9 instead
+  of 36 contacts per foot.
+- `check_climb`: stand holds 0 ... 180 deg, all cells attached, same pad forces as box.
+- CPU (M3 Max, 1 core): mj_step 10.7k -> 29.4k/s, env step 1.80 -> 0.55 ms, reset 59 -> 10 ms.
+- Warp, A10 (`warp_check --pad-cell-shape sphere`): parity as for boxes (0.00 mm, no NaN,
+  0 ... 180 deg). Throughput 333-343k world-steps/s elliptic, 433k pyramidal; flat from 1024
+  to 8192 worlds. ~3.3x the box cells -- but about what the M3 Max does on 12 cores
+  (12 x 29.4k = 353k). Physics alone, the A10 is still no faster than the Mac's CPU.
+
 ## Later steps (rough)
 
 - Tilted gravity / slope 0 -> 90 -> 180 deg, maybe starting with all magnets on.

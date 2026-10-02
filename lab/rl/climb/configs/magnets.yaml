@@ -28,6 +28,8 @@ mjmodel:
   mass_pad: 0.05
   pad_size: 0.04
   pad_cells: 3
+  pad_cell_shape: sphere   # 9 contacts per foot instead of 36; same holding (test_foot)
+  pad_sphere_radius: 0.0   # 0: pad_thickness / 2
   pad_thickness: 0.006
   pivot_height: 0.005
   ankle_range_deg: 45.0

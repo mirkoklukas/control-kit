@@ -40,6 +40,7 @@ runkit eval lab.rl.climb.train
   off in swing), the policy's magnet outputs are ignored. `"policy"`: the policy switches.
 - **Observation v3 (122):** v1 with the surface normal and gravity (both in the body
   frame), magnet command / state, attached flags, clock phase.
+- **Pad cells:** 3 x 3 spheres by default (`pad_cell_shape`; `"box"` for the old boxes).
 - **Attached** (replaces *planted*): magnet on, all pad cells in contact, pad flat.
 - **Gravity:** `gravity_random=true` draws tilt ~ U[0, `gravity_tilt_max_deg`] and a random
   azimuth per episode. The floor stays the world xy-plane.
