@@ -49,7 +49,9 @@ class MjModelCfg:
     pad_friction: float = 0.5       # mu (painted steel ~0.3-0.5)
 
     # --- adhesion (MuJoCo `adhesion` actuator on each pad cell; ctrl in [0, 1]) ---
-    adhesion_gain: float = 30.0     # max attraction force per foot (N), split over cells
+    adhesion_gain: float = 40.0     # max attraction force per foot (N), split over cells.
+                                    # 40 since 2026-10-02: magnet_test holds one leg lifted
+                                    # at every gravity direction (30 failed at 90-150 deg)
     adhesion_margin: float = 0.002  # pad geom margin: adhesion acts within this gap (m)
 
     # --- leg servos ---
@@ -80,8 +82,9 @@ class ClimbEnvCfg:
     episode_s: float = 10.0         # episode length (s)
     action_scale: float = 0.3       # action in [-1, 1] -> joint target offset from `stand` (rad)
     reset_noise: float = 0.05       # uniform joint-angle noise at reset (rad)
-    obs: str = "v3"                 # observation layout: "v3" (v1 + surface normal, magnets,
-                                    # attached; see env.py). Fixed at construction
+    obs: str = "v3"                 # observation layout: "v3" (126: v1 + surface normal,
+                                    # gravity, magnets, attached, feet touching, clock phase;
+                                    # see env.py). Fixed at construction
 
     # --- magnets (one per foot; all pad cells of a foot switch together) ---
     magnet_mode: str = "clock"      # "clock": magnets follow the phase clock (on in stance,
@@ -124,7 +127,9 @@ class ClimbEnvCfg:
     w_orient: float = 0.4           # C_orient ||n - z_body||
     w_height: float = 0.0           # C_dist (d_hat - d)^2; off (2026-10-02), was 50 (doc's
                                     # 1.0 is negligible in m^2)
-    w_clear: float = 100.0          # C_clear sum_swing (h_hat - h)^2 |v_t|; doc's 0.1 negligible
+    w_clear: float = 0.0            # C_clear sum_air (h_hat - h)^2 |v_t|. Off (2026-10-02): the
+                                    # speed factor lets a low swing foot that does not move go
+                                    # free; replaced by w_swing_height
     w_slip: float = 5.0             # C_slip sum_attached |v_t| + r_pad |w_n|; paper 2, raised
                                     # (2026-09-27): planted pads were skating ~0.1 m/s
     w_drag: float = 2.0             # C_drag sum_{touching, not attached} |v_t| (new, see doc)
@@ -139,12 +144,18 @@ class ClimbEnvCfg:
     w_switch: float = 0.0           # C_switch: per magnet toggle (EPMs spend energy switching)
     w_phase: float = 4.0            # R_phase: feet match the clock's stance / swing (magnet and
                                     # contact). The obs has the phase either way
+    w_swing_height: float = 2.0     # C_swing_height: per swing foot, the fraction of
+                                    # swing_height it is missing (1 on the floor, 0 at the target)
+    w_swing_touch: float = 2.0      # C_swing_touch: per foot the clock has in swing that still
+                                    # touches something (lift it, don't just release it)
     w_term: float = 50.0            # termination cost (trunk contact / tipped over). The
                                     # paper's 1 would make sitting down (ending the episode)
                                     # cheaper than an episode of early exploration costs
 
     # --- reward parameters ---
-    clear_height: float = 0.06      # h_hat (m)
+    clear_height: float = 0.06      # h_hat (m), for w_clear
+    swing_height: float = 0.03      # swing feet should be lifted at least this (m); 3 cm held
+                                    # in magnet_test (one leg lifted, 0-180 deg)
     hard_clear_height: float = 0.01 # h_min: feet below this should not move along the floor (m)
     hard_clear_vtol: float = 0.01   # speed allowed below h_min (m/s)
     ankle_safe_deg: float = 30.0    # q_safe

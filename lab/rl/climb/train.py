@@ -17,7 +17,9 @@ repo root):
 
     runkit run  lab.rl.climb.train steps=10e6 --tag=magnets
     runkit run  lab.rl.climb.train --branch 2cc9 steps=15e6 env.w_support=10
-    runkit eval lab.rl.climb.train
+    runkit eval lab.rl.climb.train                                     # random episode
+    runkit eval lab.rl.climb.train --seed=123                          # a given one
+    runkit eval lab.rl.climb.train --seed=None                         # the run's cfg.seed
     runkit eval runs/climb/latest/checkpoints/current              # no module needed
     cd "$(runkit latest lab.rl.climb.train)"                           # the latest run dir
 
@@ -358,11 +360,16 @@ def _rel(p: Path) -> str:
 
 
 @exp.eval
-def evaluate(ckpt: Checkpoint) -> dict:
+def evaluate(ckpt: Checkpoint, seed: int | None) -> dict:
     """Run one deterministic episode of a trained policy and report how it walks.
 
     The policy is the one saved in ``ckpt`` (by default the latest checkpoint of the
-    latest run). The env is reset with the run's seed and uses the run's full-strength
+    latest run). The env is reset with ``seed`` -- runkit hands in a fresh random one
+    per eval, or ``--seed=N`` -- so evals of one checkpoint see different episodes
+    (gravity, clock phase, joint noise), and any of them can be repeated;
+    ``--seed=None`` uses the run's own ``cfg.seed`` (the same episode every eval, as
+    before). It uses the
+    run's full-strength
     ``env`` config from its ``config.yaml`` -- not the scheduled values training used at
     the checkpoint's step -- so every eval scores against the same target reward.
 
@@ -383,6 +390,8 @@ def evaluate(ckpt: Checkpoint) -> dict:
 
     Args:
         ckpt: the checkpoint to evaluate (runkit picks it from the command line).
+        seed: the env's reset seed (runkit: random, or ``--seed``); None: the run's
+            ``cfg.seed``.
 
     Returns:
         The summary dict (also in ``eval.yaml``).
@@ -395,13 +404,14 @@ def evaluate(ckpt: Checkpoint) -> dict:
     # The config is the run's own (full-strength weights), not the checkpoint's
     # scheduled one.
     cfg = load_config(PolicyCfg, ckpt.run / "config.yaml")
+    seed = cfg.seed if seed is None else seed          # --seed=None: the run's seed
     eval_dir = ckpt.eval
 
     # VecNormalize holds the running mean / std of the observations seen in training;
     # the policy only understands normalized observations. Freeze the statistics
     # (training=False) and keep rewards raw (norm_reward=False).
     venv = VecNormalize.load(str(ckpt.state / "vecnormalize.pkl"),
-                             DummyVecEnv([lambda: ClimbEnv(cfg.mjmodel, cfg.env, cfg.seed)]))
+                             DummyVecEnv([lambda: ClimbEnv(cfg.mjmodel, cfg.env, seed)]))
     venv.training, venv.norm_reward = False, False
     model = PPO.load(ckpt.state / "model.zip", device="cpu")
 
@@ -415,8 +425,8 @@ def evaluate(ckpt: Checkpoint) -> dict:
     # Per policy step: the simulation state (qpos, qvel, ctrl, for the replay) and the
     # per-foot contact state from the env's info (normal force, cells in contact,
     # attached, magnet, position).
-    log = {k: [] for k in ("qpos", "qvel", "ctrl", "force", "n_cells", "attached", "magnet",
-                           "foot_pos")}
+    log = {k: [] for k in ("qpos", "qvel", "ctrl", "force", "cells_touching", "attached",
+                           "magnet", "foot_pos")}
     ret, vx = 0.0, []
     for _ in range(env.max_steps):
         act, _ = model.predict(venv.normalize_obs(obs), deterministic=True)
@@ -425,7 +435,7 @@ def evaluate(ckpt: Checkpoint) -> dict:
         d = env.data
         for k, v in (("qpos", d.qpos), ("qvel", d.qvel), ("ctrl", d.ctrl)):
             log[k].append(np.copy(v))
-        for k in ("force", "n_cells", "attached", "magnet", "foot_pos"):
+        for k in ("force", "cells_touching", "attached", "magnet", "foot_pos"):
             log[k].append(info[k])
 
         # the env's raw reward (not normalized) and the forward speed in the body frame
@@ -438,10 +448,14 @@ def evaluate(ckpt: Checkpoint) -> dict:
     # `attached` is the env's definition: magnet on, the pad's cells in contact, the pad
     # flat. Shape (T, 4).
     T = len(log["qpos"])
+    g = np.asarray(reset_info["gravity"]) / np.linalg.norm(reset_info["gravity"])
+    tilt = float(np.degrees(np.arccos(np.clip(-g[2], -1.0, 1.0))))
+    azim = float(np.degrees(np.arctan2(g[1], g[0])) % 360.0)
     attached = np.asarray(log["attached"])
     summary = {
         # which policy, and how long the episode lasted
         "checkpoint": ckpt.name,
+        "seed": seed,                                   # repeat: --seed=<it>
         "checkpoint_steps": ckpt.info.get("steps"),
         "steps": T,
         "seconds": round(T * env.dt, 3),
@@ -458,9 +472,12 @@ def evaluate(ckpt: Checkpoint) -> dict:
         # magnets: fraction of time each is on; this episode's gravity vector
         "magnet": [round(float(x), 3) for x in np.asarray(log["magnet"]).mean(0)],
         "gravity": [round(float(x), 3) for x in reset_info["gravity"]],
+        "gravity_tilt_deg": round(tilt, 1),             # from the floor normal
+        "gravity_azimuth_deg": round(azim, 1),          # about z, from +x
     }
 
     # --- 4. print the summary and the gait diagram ------------------------------------
+    print(f"seed {seed}, gravity tilt {tilt:.0f} deg, azimuth {azim:.0f} deg")
     print(f"episode: {T} steps ({summary['seconds']} s), return {ret:.2f}, mean vx "
           f"{summary['vx']:.3f} (cmd {cfg.env.cmd_vx}), distance {summary['distance']:.2f} m, "
           f"{'full length' if summary['full_length'] else 'terminated'}")

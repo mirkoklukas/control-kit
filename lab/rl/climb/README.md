@@ -38,8 +38,8 @@ runkit eval lab.rl.climb.train
   optional delay `magnet_delay_s`).
 - **Magnets:** `magnet_mode="clock"` (default): scripted from the phase clock (on in stance,
   off in swing), the policy's magnet outputs are ignored. `"policy"`: the policy switches.
-- **Observation v3 (122):** v1 with the surface normal and gravity (both in the body
-  frame), magnet command / state, attached flags, clock phase.
+- **Observation v3 (126):** v1 with the surface normal and gravity (both in the body
+  frame), magnet command / state, attached flags, feet touching, clock phase.
 - **Pad cells:** 3 x 3 spheres by default (`pad_cell_shape`; `"box"` for the old boxes).
 - **Attached** (replaces *planted*): magnet on, all pad cells in contact, pad flat.
 - **Gravity:** `gravity_random=true` draws tilt ~ U[0, `gravity_tilt_max_deg`] and a random

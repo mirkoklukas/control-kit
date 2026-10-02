@@ -2,8 +2,8 @@
 gravity with the magnets on (or off), and print what the env sees.
 
 Answers: do the hovering pads (inside the contact margin) give *active* contacts, so
-``n_cells`` and ``attached`` work? Does the stand pose hold with the magnets on up to
-180 deg?
+``cells_touching`` and ``attached`` work? Does the stand pose hold with the magnets on
+up to 180 deg?
 
     uv run --extra mjx python -m lab.rl.climb.check_climb
     uv run --extra mjx python -m lab.rl.climb.check_climb magnets=0 seconds=1
@@ -48,7 +48,8 @@ def main(argv):
             end = "detached"                             # below min_attached: the env
                                                          # terminates (min_attached > 0)
         drift = 1e3 * np.linalg.norm(env.data.qpos[:3] - x0)
-        print(f"{tilt:>4} | {str(info['n_cells']):<10} | {str(info['attached'].astype(int)):<9} "
+        cells, attached = info["cells_touching"], info["attached"].astype(int)
+        print(f"{tilt:>4} | {str(cells):<10} | {str(attached):<9} "
               f"| {np.array2string(info['force'], precision=1):<22} | {drift:>10.1f} | {end}")
 
 

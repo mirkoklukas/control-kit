@@ -37,7 +37,7 @@ mjmodel:
   ankle_damping: 0.005
   ankle_armature: 0.0001
   pad_friction: 0.5
-  adhesion_gain: 30.0
+  adhesion_gain: 40.0     # 30 failed magnet_test (one leg lifted) at 90-150 deg tilt
   adhesion_margin: 0.002
   kp: 10.0
   kv: 1.0
@@ -78,7 +78,7 @@ env:
   w_joint_speed: 0.03
   w_orient: 0.4
   w_height: 0.0          # off (2026-10-02)
-  w_clear: 100.0
+  w_clear: 0.0           # off: replaced by w_swing_height (no speed factor)
   w_slip: 30.0           # bd35df55 at 5: two feet barely stepped and were slid along instead;
                          # b46f0f04 at 10 (w_support 15): two feet never lifted, slid along
   w_drag: 10.0           # sliding feet that are lightly loaded count as drag, not slip
@@ -87,9 +87,12 @@ env:
   w_air: 20.0
   w_support: 0.0         # off: min_attached = 3 terminates before it could cost anything
   w_switch: 0.0
+  w_swing_height: 2.0    # per swing foot: fraction of swing_height missing
+  w_swing_touch: 2.0     # per swing foot still touching
   w_phase: 4.0          # half of w_lin; the phase reward is in [0, 1] like the lin kernel
   w_term: 50.0
   clear_height: 0.06
+  swing_height: 0.03     # lift held in magnet_test
   hard_clear_height: 0.01
   hard_clear_vtol: 0.01
   ankle_safe_deg: 30.0

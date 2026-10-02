@@ -8,3 +8,6 @@ extras = ["mjx"]           # MuJoCo / JAX: mjmodel.py imports jax
 
 [env.train]
 extras = ["mjx", "sb3"]    # + stable-baselines3 (torch) for PPO on CPU
+
+[env.magnet_test]
+follow = "none"            # prints its own table; no metrics stream to follow

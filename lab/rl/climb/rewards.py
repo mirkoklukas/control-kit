@@ -242,6 +242,42 @@ def magnet_switch(cmd, cmd_prev):
     return float(np.sum(cmd != cmd_prev))
 
 
+def swing_height(stance, h, h_target):
+    """``C_swing_height = sum_{swing} max(0, 1 - h_i / h_target)``: swing feet too low.
+
+    The fraction of the target height each swing foot is missing: 1 on the floor, 0 at
+    or above ``h_target``, linear in between. Not scaled by the foot's speed (unlike
+    :func:`foot_clearance`), so a swing foot left low costs even when it does not move.
+
+    Args:
+        stance: (4,) bool per foot. True: the clock wants the foot in stance.
+        h: (4,) pad face height above the floor (m).
+        h_target: the swing height to reach (m).
+
+    Returns:
+        The summed shortfall over the swing feet, 0 ... 4.
+    """
+    short = np.clip(1.0 - np.asarray(h) / h_target, 0.0, 1.0)
+    return float(np.sum(np.where(stance, 0.0, short)))
+
+
+def swing_touch(stance, foot_touching):
+    """``C_swing_touch = sum_i 1[foot i in swing and touching]``: swing feet not lifted.
+
+    The clock has the foot in swing (its magnet off, in clock mode), but the foot still
+    touches something. Pushes the policy to lift the swing foot, not just leave it
+    resting on the floor with the magnet off.
+
+    Args:
+        stance: (4,) bool per foot. True: the clock wants the foot in stance.
+        foot_touching: (4,) bool per foot. True: the foot touches anything.
+
+    Returns:
+        The number of swing feet that touch, 0 ... 4.
+    """
+    return float(np.sum(~stance & foot_touching))
+
+
 def phase_match(stance, attached, magnet, touching):
     """``R_phase = mean_i 1[foot i matches the clock]``, in [0, 1].
 

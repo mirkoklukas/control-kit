@@ -70,7 +70,8 @@ Open:
 
 Self-contained copy of `lab/rl` (see its `README.md`). Built as decided above, plus:
 
-- Obs v3 (122) = v1 + surface normal, gravity, magnet cmd / actual, attached, clock phase.
+- Obs v3 (126) = v1 + surface normal, gravity, magnet cmd / actual, attached, feet
+  touching (any pad cell in contact; added 2026-10-02), clock phase.
   The clock phase is always in the obs (fixed size), even at `w_phase = 0`.
 - `reset(options={"tilt_deg": ..., "azimuth_deg": ...})` pins the gravity (checks, evals).
 - Magnets scripted from the clock (`magnet_mode="clock"`, default since 2026-10-01): on in
@@ -94,6 +95,24 @@ Findings:
 - Cost: 3 x 3 cells = 144 contacts. Step 1.4 ms (walk env with 1 cell: 0.4 ms), reset
   70-110 ms (the 0.2 s settle). Expect ~3-4x slower training than the walk env. Sphere
   cells (1 contact each instead of 4) would help.
+
+## Magnet test: three-foot hold, one leg lifted (2026-10-02)
+
+`climb/magnet_test.py` (runkit experiment, prints its own grid): stand, magnets on, gravity
+ramped to (tilt, azimuth) on a 15 deg grid over 0-180 x 0-360, then leg 0's magnet off and
+its foot raised 3 cm, held 2 s. Fails on < 3 stance feet attached, stance-pad slip > 5 mm,
+or trunk contact; runs on after a failure to tell "hung on" from "fell".
+
+- 30 N/foot: holds 0-75 and 165-180 deg; fails in about half the directions at 90-150
+  (overhang), mostly where gravity's in-floor part points away from the lifted leg. Mostly
+  a stance foot losing 1-2 of 9 cells right at the release (~0.1 s into the lift); falls only
+  at 105-120 deg towards the diagonal leg. Likely: the stance diagonal (feet 1-3) runs under
+  the COM, and the release dumps the lifted foot's tension onto the stance feet at once.
+- 40 / 50 / 60 N: all 266 directions hold; slip <= 3.0 / 2.5 / 2.3 mm. Peak servo torque
+  <= 0.43 of the limit everywhere: magnets, not servos, are the limit.
+- `adhesion_gain` default 30 -> 40 N (~1.45 x body weight per foot; robot ~2.8 kg).
+- Base sags ~4 cm on the wall at every gain: soft servos (kp 10), not the magnets.
+- Not tried yet: lower / wider / shifted body, slower release; threshold between 30 and 40.
 
 ## GPU port (to discuss, 2026-10-02)
 

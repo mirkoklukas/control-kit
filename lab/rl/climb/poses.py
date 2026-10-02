@@ -33,7 +33,7 @@ def foot_targets(robot: Robot, cfg: MjModelCfg) -> jax.Array:
     return cfg.stand_foot_radius * dirs.at[:, 2].set(0.0) + jnp.array([0.0, 0.0, z])
 
 
-def leg_angles(robot: Robot, cfg: MjModelCfg, height) -> tuple[jax.Array, jax.Array]:
+def leg_angles(robot: Robot, cfg: MjModelCfg, height, lift=None) -> tuple[jax.Array, jax.Array]:
     """Leg IK with the body level at ``height`` and feet on :func:`foot_targets`.
 
     Branch choice: reachable, within limits, and the knee highest (spider stance).
@@ -41,6 +41,8 @@ def leg_angles(robot: Robot, cfg: MjModelCfg, height) -> tuple[jax.Array, jax.Ar
     Args:
         robot, cfg: the robot and config.
         height: scalar base height (jit/vmap friendly).
+        lift: optional (num_legs,) raise of each foot target along world z (m), e.g.
+            one leg lifted off the floor (``magnet_test``). None: all on the floor.
 
     Returns:
         ``(ok, thetas)`` -- (num_legs,) bool and (num_legs, 3).
@@ -48,6 +50,8 @@ def leg_angles(robot: Robot, cfg: MjModelCfg, height) -> tuple[jax.Array, jax.Ar
     body = SE3.from_translation(jnp.array([0.0, 0.0, 1.0]) * height)
     shoulders = robot.shoulders(body)
     feet = foot_targets(robot, cfg)
+    if lift is not None:
+        feet = feet.at[:, 2].add(jnp.asarray(lift))
     leg = robot.leg
 
     def one(shoulder, foot):
