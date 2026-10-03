@@ -1,0 +1,122 @@
+<mujoco model="robot">
+  <compiler angle="radian" autolimits="true"/>
+  <default>
+    <geom contype="0" conaffinity="0"/>
+    <joint type="hinge"/>
+    <default class="link"><geom type="capsule" size="0.02"/></default>
+    <default class="foot"><geom type="sphere" size="0.02" material="foot"/></default>
+    <default class="base"><geom type="box" material="base"/></default>
+    <default class="j0"><joint axis="0 0 1" range="-1.57079637 1.57079637"/></default>
+    <default class="j1"><joint axis="0 1 0" range="-2.61799383 2.61799383"/></default>
+    <default class="j2"><joint axis="0 1 0" range="-2.61799383 2.61799383"/></default>
+  </default>
+  <asset>
+    <material name="base"  rgba="1 1 1 1"/>
+    <material name="coxa"  rgba="0.42 0.42 0.42 1"/>
+    <material name="femur" rgba="0.32 0.32 0.32 1"/>
+    <material name="tibia" rgba="0.039216 0.760784 1 1"/>
+    <material name="foot"  rgba="1 0.258824 0.976471 1"/>
+    <material name="terrain" rgba="0.2 0.28 0.36 1"/>
+    <texture type="skybox" builtin="gradient" rgb1="0.3 0.5 0.7" rgb2="0 0 0" width="512" height="512"/>
+    <texture name="grid" type="2d" builtin="checker" rgb1="0.2 0.3 0.4" rgb2="0.1 0.15 0.2" width="512" height="512"/>
+    <material name="grid" texture="grid" texrepeat="16.6667 16.6667"/>
+    <mesh name="hex" vertex="0.121244 0.07 -0.035 8.57253e-18 0.14 -0.035 -0.121244 0.07 -0.035 -0.121244 -0.07 -0.035 -2.57176e-17 -0.14 -0.035 0.121244 -0.07 -0.035 0.121244 0.07 0.035 8.57253e-18 0.14 0.035 -0.121244 0.07 0.035 -0.121244 -0.07 0.035 -2.57176e-17 -0.14 0.035 0.121244 -0.07 0.035"/>
+    <mesh name="hex_ghost" vertex="0.117606 0.0679 -0.03395 8.31535e-18 0.1358 -0.03395 -0.117606 0.0679 -0.03395 -0.117606 -0.0679 -0.03395 -2.49461e-17 -0.1358 -0.03395 0.117606 -0.0679 -0.03395 0.117606 0.0679 0.03395 8.31535e-18 0.1358 0.03395 -0.117606 0.0679 0.03395 -0.117606 -0.0679 0.03395 -2.49461e-17 -0.1358 0.03395 0.117606 -0.0679 0.03395"/>
+  </asset>
+  <worldbody>
+    <body name="base" pos="0 0 0">
+      <freejoint name="root"/>
+      <geom name="body_nose" type="box" pos="0.0424352 0 0.041" size="0.066684 0.035 0.006" rgba="0.2 0.2 0.2 1"/>
+      <geom class="base" name="base" type="mesh" mesh="hex"/>
+<body name="leg0_0" pos="0.121243551 0.0700000003 0" quat="0.965925813 0 0 0.258819103">
+  <joint class="j0" name="leg0_j0"/>
+  <geom class="link" fromto="0 0 0 0.0500000007 0 0" material="coxa"/>
+<body name="leg0_1" pos="0.0500000007 0 0" quat="1 0 0 0">
+  <joint class="j1" name="leg0_j1"/>
+  <geom class="link" fromto="0 0 0 0.200000003 0 0" material="femur"/>
+<body name="leg0_2" pos="0.200000003 0 0" quat="1 0 0 0">
+  <joint class="j2" name="leg0_j2"/>
+  <geom class="link" fromto="0 0 0 0.300000012 0 0" material="tibia" size="0.015"/>
+<body name="foot0" pos="0.300000012 0 0" quat="1 0 0 0">
+  <geom class="foot" name="foot0"/>
+</body>
+</body></body></body>
+<body name="leg1_0" pos="-6.11959416e-09 0.140000001 0" quat="0.707106829 0 0 0.707106769">
+  <joint class="j0" name="leg1_j0"/>
+  <geom class="link" fromto="0 0 0 0.0500000007 0 0" material="coxa"/>
+<body name="leg1_1" pos="0.0500000007 0 0" quat="1 0 0 0">
+  <joint class="j1" name="leg1_j1"/>
+  <geom class="link" fromto="0 0 0 0.200000003 0 0" material="femur"/>
+<body name="leg1_2" pos="0.200000003 0 0" quat="1 0 0 0">
+  <joint class="j2" name="leg1_j2"/>
+  <geom class="link" fromto="0 0 0 0.300000012 0 0" material="tibia" size="0.015"/>
+<body name="foot1" pos="0.300000012 0 0" quat="1 0 0 0">
+  <geom class="foot" name="foot1"/>
+</body>
+</body></body></body>
+<body name="leg2_0" pos="-0.121243551 0.0700000077 0" quat="0.258819193 0 0 0.965925872">
+  <joint class="j0" name="leg2_j0"/>
+  <geom class="link" fromto="0 0 0 0.0500000007 0 0" material="coxa"/>
+<body name="leg2_1" pos="0.0500000007 0 0" quat="1 0 0 0">
+  <joint class="j1" name="leg2_j1"/>
+  <geom class="link" fromto="0 0 0 0.200000003 0 0" material="femur"/>
+<body name="leg2_2" pos="0.200000003 0 0" quat="1 0 0 0">
+  <joint class="j2" name="leg2_j2"/>
+  <geom class="link" fromto="0 0 0 0.300000012 0 0" material="tibia" size="0.015"/>
+<body name="foot2" pos="0.300000012 0 0" quat="1 0 0 0">
+  <geom class="foot" name="foot2"/>
+</body>
+</body></body></body>
+<body name="leg3_0" pos="-0.121243551 -0.0699999928 0" quat="0.258818954 0 0 -0.965925872">
+  <joint class="j0" name="leg3_j0"/>
+  <geom class="link" fromto="0 0 0 0.0500000007 0 0" material="coxa"/>
+<body name="leg3_1" pos="0.0500000007 0 0" quat="1 0 0 0">
+  <joint class="j1" name="leg3_j1"/>
+  <geom class="link" fromto="0 0 0 0.200000003 0 0" material="femur"/>
+<body name="leg3_2" pos="0.200000003 0 0" quat="1 0 0 0">
+  <joint class="j2" name="leg3_j2"/>
+  <geom class="link" fromto="0 0 0 0.300000012 0 0" material="tibia" size="0.015"/>
+<body name="foot3" pos="0.300000012 0 0" quat="1 0 0 0">
+  <geom class="foot" name="foot3"/>
+</body>
+</body></body></body>
+<body name="leg4_0" pos="1.66948333e-09 -0.140000001 0" quat="0.707106829 0 0 -0.707106769">
+  <joint class="j0" name="leg4_j0"/>
+  <geom class="link" fromto="0 0 0 0.0500000007 0 0" material="coxa"/>
+<body name="leg4_1" pos="0.0500000007 0 0" quat="1 0 0 0">
+  <joint class="j1" name="leg4_j1"/>
+  <geom class="link" fromto="0 0 0 0.200000003 0 0" material="femur"/>
+<body name="leg4_2" pos="0.200000003 0 0" quat="1 0 0 0">
+  <joint class="j2" name="leg4_j2"/>
+  <geom class="link" fromto="0 0 0 0.300000012 0 0" material="tibia" size="0.015"/>
+<body name="foot4" pos="0.300000012 0 0" quat="1 0 0 0">
+  <geom class="foot" name="foot4"/>
+</body>
+</body></body></body>
+<body name="leg5_0" pos="0.121243544 -0.0700000226 0" quat="0.965925813 0 0 -0.258819103">
+  <joint class="j0" name="leg5_j0"/>
+  <geom class="link" fromto="0 0 0 0.0500000007 0 0" material="coxa"/>
+<body name="leg5_1" pos="0.0500000007 0 0" quat="1 0 0 0">
+  <joint class="j1" name="leg5_j1"/>
+  <geom class="link" fromto="0 0 0 0.200000003 0 0" material="femur"/>
+<body name="leg5_2" pos="0.200000003 0 0" quat="1 0 0 0">
+  <joint class="j2" name="leg5_j2"/>
+  <geom class="link" fromto="0 0 0 0.300000012 0 0" material="tibia" size="0.015"/>
+<body name="foot5" pos="0.300000012 0 0" quat="1 0 0 0">
+  <geom class="foot" name="foot5"/>
+</body>
+</body></body></body>
+    </body>
+    <geom name="ground0" type="box" pos="0 0 -0.05" size="5 5 0.05" material="grid"/>
+    <geom name="terrain0" type="box" pos="0.9 0 0.1" size="0.25 0.6 0.1" material="terrain"/>
+    <geom name="terrain1" type="box" pos="1.6 0 0.25" size="0.25 0.6 0.25" material="terrain"/>
+    <geom name="terrain2" type="box" pos="0.2 0.9 0.35" size="0.6 0.08 0.35" material="terrain"/>
+    <geom name="terrain3" type="box" pos="1.93 0 1" size="0.08 0.6 1" material="terrain"/>
+    <light pos="0 0 3" dir="0 0 -1" diffuse="0.8 0.8 0.8"/>
+    <light pos="1.2 0 3.5" dir="0.65 0 -2.5" diffuse="0.6 0.6 0.6"/>
+    <body name="target" mocap="true" pos="0 0 0.25">
+      <geom type="mesh" mesh="hex_ghost" material="base"/>
+      <geom type="box" pos="0.0411622 0 0.03995" size="0.0646834 0.03395 0.006" rgba="0.2 0.2 0.2 1"/>
+    </body>
+  </worldbody>
+</mujoco>
