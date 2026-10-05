@@ -1,0 +1,9 @@
+# How runkit starts the experiments in this folder, read before they are imported:
+#   runkit run lab.gait_graph.planner.experiments.torques
+
+[env]
+root = "./runs"            # lab/gait_graph/planner/experiments/runs (gitignored)
+extras = ["mjx"]           # MuJoCo / JAX
+
+[env.torques]
+follow = "none"            # prints its own table; no metrics stream to follow
