@@ -66,7 +66,7 @@ class Statics:
     bias_joint: jax.Array
 
 
-def statics(mx, foot_ids, qpos, g) -> Statics:
+def statics(mx, foot_ids, qpos, g, joint_dofs=None) -> Statics:
     """The statics of posture ``qpos`` under gravity ``g``.
 
     Args:
@@ -74,6 +74,9 @@ def statics(mx, foot_ids, qpos, g) -> Statics:
         foot_ids: (nf,) foot body ids.
         qpos: (nq,) configuration.
         g: (3,) gravity vector, world frame (m/s^2).
+        joint_dofs: (nj,) the dofs that are actuated joints (their torques are bounded
+            in :func:`hold_lp`); None: every dof after the free joint. The climb robot's
+            passive ankles are dofs but not actuated (:mod:`.climb_statics`).
 
     Returns:
         The :class:`Statics` of the posture.
@@ -82,8 +85,9 @@ def statics(mx, foot_ids, qpos, g) -> Statics:
     d = mjx.forward(mx, mjx.make_data(mx).replace(qpos=qpos, qvel=jnp.zeros(mx.nv)))
     # (nf, nv, 3): column-wise Jacobian of each foot point (body origin), transposed
     J = jax.vmap(lambda fid: mjx.jac(mx, d, d.xpos[fid], fid)[0])(foot_ids)
-    return Statics(J_base=J[:, :6, :], J_joint=J[:, 6:, :],
-                   bias_base=d.qfrc_bias[:6], bias_joint=d.qfrc_bias[6:])
+    dofs = jnp.arange(6, mx.nv) if joint_dofs is None else jnp.asarray(joint_dofs)
+    return Statics(J_base=J[:, :6, :], J_joint=J[:, dofs, :],
+                   bias_base=d.qfrc_bias[:6], bias_joint=d.qfrc_bias[dofs])
 
 
 def point_mass_statics(com, feet, mass, g) -> Statics:
@@ -249,22 +253,44 @@ def hold_lp(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
         A_eq, b_eq: (6, 3p + 1), (6,) equilibrium.
         G, h: (m, 3p + 1), (m,) adhesion, friction, torques and the cap on s.
     """
+    return _lp(st, planted_idx, normals, adhesion, mu, tau_max, faces,
+               eq_col=-st.bias_base, eq_rhs=jnp.zeros(6),
+               tau_const=jnp.zeros_like(st.bias_joint), tau_col=st.bias_joint, cap=s_cap)
+
+
+def _lp(st: Statics, planted_idx, normals, adhesion, mu, tau_max, faces, *, eq_col,
+        eq_rhs, tau_const, tau_col, cap, slack=False):
+    """The shared LP of :func:`hold_lp`, :func:`disturbance_lp` and :func:`foot_forces`, in
+    ``x = (F_P, t)``: the planted feet's forces and one scalar t to maximize.
+
+        max t  subject to
+          equilibrium:   G_P F_P + t eq_col = eq_rhs
+          adhesion:      n_j . F_j >= -adhesion          (+ t, if slack)
+          friction:      d_k . F_j <= mu_p (n_j . F_j + adhesion), inner pyramid (- t, if slack)
+          torques:       |tau_const + t tau_col - J_P^T F_P| <= tau_max (if not None)
+          bounded:       t <= cap
+
+    With ``slack``, t is a common margin (N) on every adhesion and friction row.
+
+    Returns:
+        ``(c, A_eq, b_eq, G, h)`` as in :func:`hold_lp`.
+    """
     idx = jnp.asarray(planted_idx)
     p = len(planted_idx)
     nx = 3 * p + 1
     normals = jnp.asarray(normals, float)
 
     G_eq = jnp.transpose(st.J_base[idx], (1, 0, 2)).reshape(6, 3 * p)
-    A_eq = jnp.concatenate([G_eq, -st.bias_base[:, None]], axis=1)
-    b_eq = jnp.zeros(6)
+    A_eq = jnp.concatenate([G_eq, jnp.asarray(eq_col)[:, None]], axis=1)
+    b_eq = jnp.asarray(eq_rhs)
 
-    # torques tau = s bias_joint - J_P^T F_P, bounded on both sides
+    # torques tau = tau_const + t tau_col - J_P^T F_P, bounded on both sides
     rows, rhs = [], []
     if tau_max is not None:
         T = jnp.concatenate([-jnp.transpose(st.J_joint[idx], (1, 0, 2)).reshape(-1, 3 * p),
-                             st.bias_joint[:, None]], axis=1)
+                             jnp.asarray(tau_col)[:, None]], axis=1)
         rows += [T, -T]
-        rhs += [jnp.full(T.shape[0], tau_max), jnp.full(T.shape[0], tau_max)]
+        rhs += [tau_max - tau_const, tau_max + tau_const]
 
     mu_p = mu * math.cos(math.pi / faces)
     angles = 2 * math.pi * jnp.arange(faces) / faces
@@ -275,14 +301,25 @@ def hold_lp(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
         foot = jnp.zeros((faces + 1, nx))
         foot = foot.at[0, 3 * j: 3 * j + 3].set(-n)                          # -n.F <= A
         foot = foot.at[1:, 3 * j: 3 * j + 3].set(d - mu_p * n)               # friction
+        if slack:
+            foot = foot.at[:, -1].set(1.0)                                   # + t <= rhs
         rows.append(foot)
         rhs.append(jnp.concatenate([jnp.array([adhesion]),
                                     jnp.full(faces, mu_p * adhesion)]))
     rows.append(jnp.zeros((1, nx)).at[0, -1].set(1.0))
-    rhs.append(jnp.array([s_cap]))
+    rhs.append(jnp.array([cap]))
 
     c = jnp.zeros(nx).at[-1].set(-1.0)
     return c, A_eq, b_eq, jnp.concatenate(rows), jnp.concatenate(rhs)
+
+
+def _solve(c, A_eq, b_eq, G, h, max_iter):
+    """Solve the LP with qpax (QR); returns ``(x, violation)``."""
+    Q = 1e-6 * jnp.eye(c.shape[0])                    # an LP; qpax wants a QP
+    x = qpax.solve_qp(Q, c, A_eq, b_eq, G, h, max_iter=max_iter,
+                      linear_solver=qpax.LinearSolver.QR)[0]
+    violation = jnp.maximum(jnp.abs(A_eq @ x - b_eq).max(), jnp.maximum(G @ x - h, 0.0).max())
+    return x, violation
 
 
 def hold_margin(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
@@ -309,10 +346,138 @@ def hold_margin(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
         violation: the largest constraint violation of the solution (equality residual
             or inequality excess, in N or N m).
     """
-    c, A_eq, b_eq, G, h = hold_lp(st, planted_idx, normals, adhesion, mu, tau_max,
-                                  faces, s_cap)
-    Q = 1e-6 * jnp.eye(c.shape[0])                    # an LP; qpax wants a QP
-    x = qpax.solve_qp(Q, c, A_eq, b_eq, G, h, max_iter=max_iter,
-                      linear_solver=qpax.LinearSolver.QR)[0]
-    violation = jnp.maximum(jnp.abs(A_eq @ x - b_eq).max(), jnp.maximum(G @ x - h, 0.0).max())
+    x, violation = _solve(*hold_lp(st, planted_idx, normals, adhesion, mu, tau_max, faces,
+                                   s_cap), max_iter)
     return x[-1], x[:-1].reshape(-1, 3), violation
+
+
+# --------------------------------------------------------------------------- #
+# Foot forces under the real gravity                                          #
+# --------------------------------------------------------------------------- #
+FORCE_CAP = 100.0   # upper bound on the slack t (N)
+
+
+def foot_forces_lp(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
+                   faces=PYRAMID_FACES, cap=FORCE_CAP):
+    """The LP of :func:`foot_forces` (``(c, A_eq, b_eq, G, h)`` as in :func:`hold_lp`), for
+    another solver: qpax is unreliable on it (see :func:`foot_forces`)."""
+    return _lp(st, planted_idx, normals, adhesion, mu, tau_max, faces, eq_col=jnp.zeros(6),
+               eq_rhs=st.bias_base, tau_const=st.bias_joint,
+               tau_col=jnp.zeros_like(st.bias_joint), cap=cap, slack=True)
+
+
+def foot_forces(st: Statics, planted_idx, normals, adhesion, mu, tau_max, faces=PYRAMID_FACES,
+                cap=FORCE_CAP, max_iter=100):
+    """Foot forces that hold the posture under the real gravity, as far from the adhesion
+    and friction limits as possible.
+
+    The forces are not unique (internal forces); this picks the most central ones: the
+    largest common slack t (N) on every adhesion and friction row, at gravity factor 1,
+    with the torque limits as hard constraints. t < 0: the posture does not hold; the
+    forces then break the limits by about |t|.
+
+    **Unreliable with qpax** (2026-10-06): on wall postures a third of the solutions miss
+    equilibrium by > 0.5 N, and it fails where the posture does not hold; HiGHS solves
+    the same LP exactly. For exact forces, solve :func:`foot_forces_lp` with HiGHS
+    (``scipy.optimize.linprog(method="highs")``), as the scores experiment does.
+
+    Args:
+        st, planted_idx, normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        cap: upper bound on t (N).
+        max_iter: qpax iterations.
+
+    Returns:
+        A tuple ``(F, t, violation)``:
+
+        F: (p, 3) the planted feet's forces, world frame (N): what surface and magnet
+            exert on each foot. ``n_j . F_j > 0`` pushes, ``< 0`` pulls (at most A).
+        t: the common slack (N).
+        violation: the LP solution's constraint violation.
+    """
+    x, violation = _solve(*_lp(st, planted_idx, normals, adhesion, mu, tau_max, faces,
+                               eq_col=jnp.zeros(6), eq_rhs=st.bias_base,
+                               tau_const=st.bias_joint, tau_col=jnp.zeros_like(st.bias_joint),
+                               cap=cap, slack=True), max_iter)
+    return x[:-1].reshape(-1, 3), x[-1], violation
+
+
+# --------------------------------------------------------------------------- #
+# Disturbance margin                                                          #
+# --------------------------------------------------------------------------- #
+DIST_LENGTH = 0.1   # a moment M counts as a force M / DIST_LENGTH (m)
+DIST_CAP = 200.0    # upper bound on the disturbance (N)
+
+
+def disturbance_directions(length=DIST_LENGTH):
+    """The 12 unit disturbances, as generalized forces on the base dofs (6,): +/- a force
+    of 1 N along each axis, +/- a moment of ``length`` N m about each axis (a force of
+    1 N at ``length``). A direction e is the extra load the feet must carry, i.e. an
+    external push of -e on the body (the set is symmetric, so the minimum is the same). Axes as the statics' base rows: for :func:`statics` the forces
+    in the world frame and the moments in the body frame (MuJoCo's free joint), for
+    :func:`point_mass_statics` both in the world frame.
+
+    Returns:
+        (12, 6) array.
+    """
+    e = jnp.concatenate([jnp.eye(3), jnp.zeros((3, 3))], 1)
+    m = jnp.concatenate([jnp.zeros((3, 3)), length * jnp.eye(3)], 1)
+    return jnp.concatenate([e, -e, m, -m])
+
+
+def disturbance_lp(st: Statics, planted_idx, normals, adhesion, mu, tau_max, direction,
+                   faces=PYRAMID_FACES, cap=DIST_CAP):
+    """The disturbance LP for one direction, in ``x = (F_P, lam)``: how large an extra
+    wrench ``lam * direction`` on the body the planted feet still resist, under the real
+    gravity (factor 1).
+
+        max lam  subject to  G_P F_P - lam direction = bias_base, the limits of
+        :func:`hold_lp` with the torques at gravity factor 1, lam <= cap.
+
+    Args:
+        st, planted_idx, normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        direction: (6,) the disturbance's direction (:func:`disturbance_directions`).
+        cap: upper bound on lam.
+
+    Returns:
+        ``(c, A_eq, b_eq, G, h)`` as in :func:`hold_lp`.
+    """
+    return _lp(st, planted_idx, normals, adhesion, mu, tau_max, faces,
+               eq_col=-jnp.asarray(direction, float), eq_rhs=st.bias_base,
+               tau_const=st.bias_joint, tau_col=jnp.zeros_like(st.bias_joint), cap=cap)
+
+
+def disturbance_margin(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
+                       directions=None, faces=PYRAMID_FACES, cap=DIST_CAP, max_iter=100):
+    """How large a push or twist on the body the stance resists, in its worst direction.
+
+    Per direction e (default :func:`disturbance_directions`: 6 forces, 6 moments as
+    force x ``DIST_LENGTH``), the largest lam such that the feet still hold the posture
+    under the real gravity plus ``lam e`` on the body (:func:`disturbance_lp`). Unlike
+    s*, this depends on where the feet are and how high the body is even when friction
+    caps s* (a vertical wall): peel moments, pushes towards a weak foot.
+
+    Only meaningful where the posture holds at all (s* >= 1): otherwise the LP is
+    infeasible and lam is meaningless; check s* first.
+
+    Args:
+        st, planted_idx, normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        directions: (K, 6) disturbance directions.
+        cap: upper bound on lam (N).
+        max_iter: qpax iterations.
+
+    Returns:
+        A tuple ``(margin, lam, violation)``:
+
+        margin: min over the directions of lam (N; moments as force x ``DIST_LENGTH``).
+        lam: (K,) lam per direction.
+        violation: (K,) the solutions' constraint violations.
+    """
+    directions = disturbance_directions() if directions is None else directions
+
+    def one(e):
+        x, viol = _solve(*disturbance_lp(st, planted_idx, normals, adhesion, mu, tau_max, e,
+                                         faces, cap), max_iter)
+        return x[-1], viol
+
+    lam, viol = jax.vmap(one)(directions)
+    return lam.min(), lam, viol

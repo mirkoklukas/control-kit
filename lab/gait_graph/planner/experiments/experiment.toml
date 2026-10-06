@@ -7,3 +7,6 @@ extras = ["mjx"]           # MuJoCo / JAX
 
 [env.torques]
 follow = "none"            # prints its own table; no metrics stream to follow
+
+[env.scores]
+follow = "none"            # prints its own tables
