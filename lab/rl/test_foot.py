@@ -1,13 +1,13 @@
 """Foot pull test: single-foot fixtures in a row, each pulled until it lets go.
 
-    uv run --extra mjx python -m lab.rl_env.test_foot                 # all cases
-    uv run --extra mjx python -m lab.rl_env.test_foot model.adhesion_gain=40 pull_rate=5
-    uv run --extra mjx ctk play runs/rl_env/test_foot.npz             # replay
+    uv run --extra mjx python -m lab.rl.test_foot                 # all cases
+    uv run --extra mjx python -m lab.rl.test_foot mjmodel.adhesion_gain=40 pull_rate=5
+    uv run --extra mjx ctk play runs/rl/test_foot.npz             # replay
 
 What one fixture is
 -------------------
 A tibia (length ``leg_lengths[-1]``) rigidly attached to a *carriage* at its top
-end, carrying the real foot from :func:`.model._add_foot` at its bottom end (Cardan
+end, carrying the real foot from :func:`.mjmodel._add_foot` at its bottom end (Cardan
 ankle with weak centering springs and +/-``ankle_range_deg`` hard stops, a pad of
 N x N cells with one ``adhesion`` actuator each). The floor plays the wall. Gravity
 is off, so the pull is the only load. Two carriage types:
@@ -75,20 +75,20 @@ from typing import NamedTuple
 import mujoco
 import numpy as np
 
-from .config import ModelCfg, parse_overrides
-from .model import _add_foot, adhesion_actuators, pad_cell_bodies
+from .config import MjModelCfg, parse_overrides
+from .mjmodel import _add_foot, adhesion_actuators, pad_cell_bodies
 from .poses import ankle_angles
 
 REPO = Path(__file__).resolve().parents[2]
-OUT = REPO / "runs" / "rl_env"
+OUT = REPO / "runs" / "rl"
 
 COLORS = {"locked": (0.04, 0.76, 1.0), "free": (1.0, 0.55, 0.1), "rigid": (0.6, 0.3, 0.9)}
 
 
 @dataclass
 class FootTestCfg:
-    """Config of the foot pull test: the model (``model.*``) plus the pull protocol."""
-    model: ModelCfg = field(default_factory=ModelCfg)
+    """Config of the foot pull test: the model (``mjmodel.*``) plus the pull protocol."""
+    mjmodel: MjModelCfg = field(default_factory=MjModelCfg)
     pull_rate: float = 10.0         # force ramp (N/s)
     pull_max: float = 60.0          # ramp stops here (N)
     pull_settle: float = 0.5        # adhesion on, no pull, before the ramp (s)
@@ -165,17 +165,17 @@ def build(cfg: FootTestCfg, cases=CASES):
     spec = mujoco.MjSpec()
     spec.compiler.degree = False    # MjSpec defaults to degrees; _add_foot passes radians
     opt = spec.option
-    opt.timestep = cfg.model.timestep
-    opt.integrator = getattr(mujoco.mjtIntegrator, f"mjINT_{cfg.model.integrator.upper()}")
+    opt.timestep = cfg.mjmodel.timestep
+    opt.integrator = getattr(mujoco.mjtIntegrator, f"mjINT_{cfg.mjmodel.integrator.upper()}")
     opt.cone, opt.impratio, opt.gravity = mujoco.mjtCone.mjCONE_ELLIPTIC, 10.0, [0, 0, 0]
 
     spec.worldbody.add_geom(name="floor", type=mujoco.mjtGeom.mjGEOM_PLANE,
                             size=[0, 0, 0.05], rgba=[0.25, 0.3, 0.35, 1],
-                            friction=[cfg.model.pad_friction, 0.005, 0.0001])
+                            friction=[cfg.mjmodel.pad_friction, 0.005, 0.0001])
     spec.worldbody.add_light(pos=[0, 0, 2], dir=[0, 0, -1], diffuse=[0.8, 0.8, 0.8])
 
-    L, r = cfg.model.leg_lengths[-1], cfg.model.link_radius
-    z_pivot = cfg.model.pivot_height + cfg.model.pad_thickness
+    L, r = cfg.mjmodel.leg_lengths[-1], cfg.mjmodel.link_radius
+    z_pivot = cfg.mjmodel.pivot_height + cfg.mjmodel.pad_thickness
     xs = _x_positions(cfg, cases)
     for j, c in enumerate(cases):
         phi = math.radians(c.tilt)
@@ -197,16 +197,16 @@ def build(cfg: FootTestCfg, cases=CASES):
         mujoco.mju_mulQuat(q, _quat([1, 0, 0], phi), _quat([0, 1, 0], math.pi / 2))
         tib = car.add_body(name=f"leg{j}_2", quat=q)
         tib.add_geom(type=mujoco.mjtGeom.mjGEOM_CAPSULE, fromto=[0, 0, 0, L, 0, 0],
-                     size=[r, 0, 0], mass=cfg.model.mass_links[-1],
+                     size=[r, 0, 0], mass=cfg.mjmodel.mass_links[-1],
                      rgba=[*rgb, 0.35])                      # see-through: arrows inside
         foot = tib.add_body(name=f"foot{j}", pos=[L, 0, 0])
         foot.add_geom(type=mujoco.mjtGeom.mjGEOM_SPHERE, size=[0.005, 0, 0])  # replaced
-        _add_foot(spec, cfg.model, j)
+        _add_foot(spec, cfg.mjmodel, j)
         if c.carriage == "rigid":            # hold the ankle: q = pad_tilt
             for s_, q in zip("ab", c.pad_tilt):
                 eq = spec.add_equality(type=mujoco.mjtEq.mjEQ_JOINT, name1=f"ankle{j}_{s_}")
                 eq.data[:5] = [math.radians(q), 0, 0, 0, 0]
-                eq.solref = [2 * cfg.model.timestep, 1.0]   # stiffest stable: pad must not yield
+                eq.solref = [2 * cfg.mjmodel.timestep, 1.0]   # stiffest stable: pad must not yield
     return spec, spec.compile()
 
 
@@ -229,7 +229,7 @@ def initial_state(model, cfg: FootTestCfg, cases) -> mujoco.MjData:
     kicks the pad off on the first step -- on a leaning tibia it flips the pad."""
     data = mujoco.MjData(model)
     mujoco.mj_kinematics(model, data)
-    lim = math.radians(cfg.model.ankle_range_deg)
+    lim = math.radians(cfg.mjmodel.ankle_range_deg)
     for j, c in enumerate(cases):
         a = (np.radians(c.pad_tilt) if c.carriage == "rigid"
              else np.clip(ankle_angles(model, data, j), -lim, lim))
@@ -237,7 +237,7 @@ def initial_state(model, cfg: FootTestCfg, cases) -> mujoco.MjData:
         data.qpos[model.joint(f"ankle{j}_b").qposadr[0]] = a[1]
     mujoco.mj_kinematics(model, data)
     for j, c in enumerate(cases):
-        dz = 0.9 * cfg.model.adhesion_margin - _pad_corners(model, data, j)[:, 2].min()
+        dz = 0.9 * cfg.mjmodel.adhesion_margin - _pad_corners(model, data, j)[:, 2].min()
         if c.carriage in ("locked", "rigid"):
             data.qpos[model.joint(f"slide{j}_z").qposadr[0]] += dz
         else:
@@ -314,9 +314,9 @@ def run(model, cfg: FootTestCfg, cases=CASES) -> dict:
 
 
 def summary(log: dict, cfg: FootTestCfg, cases=CASES) -> None:
-    mu_f = cfg.model.pad_friction * cfg.model.adhesion_gain
-    print(f"adhesion {cfg.model.adhesion_gain} N, mu {cfg.model.pad_friction} (mu*F = {mu_f:.1f} N), "
-          f"ankle stop {cfg.model.ankle_range_deg} deg, pivot {1000 * cfg.model.pivot_height:.0f} mm, "
+    mu_f = cfg.mjmodel.pad_friction * cfg.mjmodel.adhesion_gain
+    print(f"adhesion {cfg.mjmodel.adhesion_gain} N, mu {cfg.mjmodel.pad_friction} (mu*F = {mu_f:.1f} N), "
+          f"ankle stop {cfg.mjmodel.ankle_range_deg} deg, pivot {1000 * cfg.mjmodel.pivot_height:.0f} mm, "
           f"ramp {cfg.pull_rate} N/s to {cfg.pull_max} N")
     section = None
     for j, c in enumerate(cases):
@@ -345,7 +345,7 @@ def main(argv: list[str]) -> None:
              model=str(xml.relative_to(REPO)),
              force_scale=4 * model.vis.map.force,   # pull arrows 4x the contact-force scale
              cases=np.array([f"{c.section}: {c.name}" for c in CASES]))
-    print("saved runs/rl_env/test_foot.npz (+ .xml)")
+    print("saved runs/rl/test_foot.npz (+ .xml)")
 
 
 if __name__ == "__main__":

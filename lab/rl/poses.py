@@ -14,15 +14,15 @@ import numpy as np
 from controlkit.kinematics import Robot, candidates
 from controlkit.se3 import SE3
 
-from .config import ModelCfg
+from .config import MjModelCfg
 
 
-def rest_height(cfg: ModelCfg) -> float:
+def rest_height(cfg: MjModelCfg) -> float:
     """Base height with the trunk lying on the ground (plus ``rest_clearance``)."""
     return cfg.body_half_height + cfg.rest_clearance
 
 
-def foot_targets(robot: Robot, cfg: ModelCfg) -> jax.Array:
+def foot_targets(robot: Robot, cfg: MjModelCfg) -> jax.Array:
     """(num_legs, 3) world ankle-pivot targets: radially out along each mount,
     at the height a flat pad puts the pivot."""
     t = robot.mounts.translation()
@@ -31,7 +31,7 @@ def foot_targets(robot: Robot, cfg: ModelCfg) -> jax.Array:
     return cfg.stand_foot_radius * dirs.at[:, 2].set(0.0) + jnp.array([0.0, 0.0, z])
 
 
-def leg_angles(robot: Robot, cfg: ModelCfg, height) -> tuple[jax.Array, jax.Array]:
+def leg_angles(robot: Robot, cfg: MjModelCfg, height) -> tuple[jax.Array, jax.Array]:
     """Leg IK with the body level at ``height`` and feet on :func:`foot_targets`.
 
     Branch choice: reachable, within limits, and the knee highest (spider stance).
@@ -71,7 +71,7 @@ def ankle_angles(model: mujoco.MjModel, data: mujoco.MjData, i: int) -> np.ndarr
     return np.array([np.arctan2(-d[2], d[0]), np.arcsin(np.clip(d[1], -1, 1))])
 
 
-def pose_qpos(model: mujoco.MjModel, robot: Robot, cfg: ModelCfg, height: float):
+def pose_qpos(model: mujoco.MjModel, robot: Robot, cfg: MjModelCfg, height: float):
     """Full ``qpos`` (base, legs, ankles laid flat) and servo targets at ``height``.
 
     Returns:
@@ -102,7 +102,7 @@ def pose_qpos(model: mujoco.MjModel, robot: Robot, cfg: ModelCfg, height: float)
     return data.qpos.copy(), thetas.reshape(-1), ankles
 
 
-def keyframe(model: mujoco.MjModel, robot: Robot, cfg: ModelCfg, name: str):
+def keyframe(model: mujoco.MjModel, robot: Robot, cfg: MjModelCfg, name: str):
     """``(qpos, ctrl)`` for keyframe ``rest`` or ``stand`` (adhesion off)."""
     height = {"rest": rest_height(cfg), "stand": cfg.stand_height}[name]
     qpos, servo, _ = pose_qpos(model, robot, cfg, height)

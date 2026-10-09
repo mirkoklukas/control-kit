@@ -5,8 +5,11 @@ Sep 23, 2026 · @Mirko Klukas
 ## References
 
 - Hwangbo et al., [Learning Agile and Dynamic Motor Skills for Legged Robots](https://arxiv.org/abs/1901.08652), Science Robotics, 2019. Basis for the reward structure and policy setup.
+- Joonho Lee et al., [Learning Quadrupedal Locomotion over Challenging Terrain](https://arxiv.org/abs/2010.11251), arXiv, 2020.
 - Schulman et al., [Trust Region Policy Optimization](https://arxiv.org/abs/1502.05477), ICML, 2015.
 - Schulman et al., [Proximal Policy Optimization Algorithms](https://arxiv.org/abs/1707.06347), arXiv, 2017.
+- [Walk These Ways: Tuning Robot Control for Generalization with Multiplicity of Behavior](https://arxiv.org/pdf/2212.03238)
+- Learning To Walk in Minutes Using Massively Parallel Deep Reinforcement Learning, [legged gym (project page)](https://leggedrobotics.github.io/legged_gym/), [Learning to Walk in Minutes Using Massively Parallel Deep Reinforcement Learning](https://arxiv.org/pdf/2109.11978), [https://proceedings.mlr.press/v164/rudin22a.html](https://proceedings.mlr.press/v164/rudin22a.html)
 
 ## Policy
 
@@ -26,6 +29,8 @@ The controller is a small MLP that maps sensor readings and a velocity command t
 - per-foot attached state (Hall sensors); in the floor env: planted flags
 - foot positions relative to the base, body frame (forward kinematics from the encoders)
 - pad heights above the surface (floor env). Not measured on the robot (needs the body height or a terrain estimate): a candidate for the privileged critic inputs instead
+
+**In the floor env** (`WalkEnvCfg.obs`, layouts in the `env.py` docstring): `v1` (101, default) follows Hwangbo et al. 2019 ([arXiv:1901.08652](https://arxiv.org/abs/1901.08652)): gravity, base height, base velocities, joint positions (relative to `stand`) and velocities, joint history (position error and velocity one and two policy steps back, t − 0.02 s and t − 0.04 s at 50 Hz, instead of the paper's t − 0.01 s and t − 0.02 s), previous action, command, plus foot heights above the floor (new, not in the paper). `v2` (76) replaces base height and joint history with ankle angles, body-frame foot positions and planted flags.
 
 **Privileged critic inputs (sim only):** adhesion fraction α per foot, pad contact forces, load margin per foot. Asymmetric actor–critic: the critic sees these, the actor only what the real robot measures.
 
@@ -91,50 +96,9 @@ $$
 
 ω\_n is the base angular velocity about the surface normal n̂, not about world z. On a wall, "turning" means rotating in the wall plane.
 
+**In the env:** the error is scaled by a sharpness of 10 (rad/s)⁻¹: R_yaw = K(10 · |ω_n − ω̂_n|). Without it (sharpness 1) the kernel is flat: a 0.3 rad/s error still keeps 98% of the reward, so the heading drifted freely. At 10, 0.1 rad/s keeps ~79% and 0.3 rad/s ~17%.
+
 **Setup needed:** start with a yaw command range of ±0.5 rad/s (start value).
-
-### Stall
-
-Progress debt: how far the base lags behind a minimum pace along the command.
-
-$$
-\begin{aligned}
-L_0 &= 0 \\
-L_k &= \max\left(0,\; L_{k-1} + f s\,dt - \Delta x_k \cdot d\right) \\
-t^{behind}_k &= L_k / (f s) \\
-C_{stall} &= \mathrm{clip}\left(\frac{t^{behind}_k - t_{grace}}{t_{ramp}},\; 0,\; 1\right)
-\end{aligned}
-$$
-
-**Weight:** 0 (cost; 5 in `configs/crawl.yaml`) · f = `stall_frac` 0.5, t\_grace = `stall_grace` 0.5 s, t\_ramp = `stall_ramp` 1.0 s · not scheduled · source: new
-
-s = ‖cmd\_xy‖ is the commanded speed and d = cmd\_xy / s its direction (body frame); f s is the minimum pace. Δx\_k is the base displacement over policy step k, rotated into the body frame (its xy part is dotted with d). For s = 0, L stays 0.
-
-**Closed form** (Lindley recursion). With x\_i = f s dt − Δx\_i · d,
-
-$$
-\begin{aligned}
-L_k &= \max_{0 \le j \le k} \sum_{i=j+1}^{k} x_i \\
-\sum_{i=j+1}^{k} x_i &= f s\,(t_k - t_j) - \Delta\ell_{j \to k}
-\end{aligned}
-$$
-
-where Δℓ is the distance covered along d over (t\_j, t\_k] and j = k is the empty sum 0. Proof by induction: max(0, L\_{k-1} + x\_k) splits into j = k (the 0) and j ≤ k − 1 (L\_{k-1} + x\_k). So L\_k is the largest shortfall, over every window ending now, of the distance covered against the distance at minimum pace.
-
-**Properties:**
-
-- A finite-window check (mean velocity over the last W seconds) can be gamed by oscillating with a period longer than W. L checks all windows at once: a cycle with zero net progress over period P leaves a shortfall f s n P after n cycles.
-- Surplus is forgotten (clamp at 0), shortfalls are not: running ahead cannot be banked, and moving back adds to the debt.
-- Standing still for T gives t\_behind ≥ T; at or above the pace, L = 0.
-- t\_grace is a lag in distance: up to t\_grace f s is free (2.5 cm at 0.1 m/s), for the speed dips within a stride.
-
-**Why, next to R\_lin:** standing still loses the R\_lin reward at a constant rate, so stillness wins whenever the gait costs (support, slip, drag) are larger. C\_stall rises with the time behind: its summed cost grows quadratically during the ramp; at the cap it is an extra w\_stall per step on top of the lost R\_lin.
-
-**Markov:** t\_behind is part of the observation, as t\_behind / (t\_grace + t\_ramp) capped at 1.
-
-**Caveats:** Δx is rotated with the body orientation at the end of the step, so this is distance along the heading, not world displacement. With a large heading drift, "progress" follows the drifting heading.
-
-**Pattern:** `ProgressDebt` (env.py) and `rewards.ramp`. For conditions without a distance (a sliding planted foot, a foot that never lifts), `ViolationTimer` (time a condition has been violated continuously) plays the role of t\_behind.
 
 ## Regularization terms (costs)
 

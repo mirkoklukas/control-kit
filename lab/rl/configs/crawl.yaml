@@ -1,8 +1,8 @@
 # Crawl gait (one leg at a time): the full test_policy config.
-#   runkit run lab.rl_env.test_policy exp:configs/crawl.yaml --tag=crawl
+#   runkit run lab.rl.test_policy exp:configs/crawl.yaml --tag=crawl
 # No seed: a fresh one is drawn per run (add `seed: N` to repeat a run).
 # A full copy: later changes to the defaults in code do not reach this file.
-model:
+mjmodel:
   num_legs: 4
   mount_radius: 0.1
   leg_lengths:
@@ -54,10 +54,13 @@ env:
   episode_s: 10.0
   action_scale: 0.3
   reset_noise: 0.05
-  w_lin: 5.0
+  obs: v1
+  w_lin: 8.0             # 531c034f at 5 (with stall): settled at 0.05 m/s, lin +0.044 per
+                         # step vs slip -0.074; full speed must pay for the extra stepping
   lin_sharpness: 40.0
   w_yaw: 3.0
-  yaw_sharpness: 1.0
+  yaw_sharpness: 10.0      # at 1 a 0.3 rad/s error kept 98% of R_yaw (heading drifted
+                           # freely); at 10: 0.1 rad/s keeps ~79%, 0.3 rad/s ~17%
   w_torque: 0.005
   w_action_rate: 0.5
   w_joint_speed: 0.03
@@ -67,12 +70,11 @@ env:
   w_slip: 30.0           # bd35df55 at 5: two feet barely stepped and were slid along instead;
                          # b46f0f04 at 10 (w_support 15): two feet never lifted, slid along
   w_drag: 10.0           # sliding feet that are lightly loaded count as drag, not slip
-  w_hard_clear: 1.0     # new: feet below 1 cm (skimming, not just touching) stay put
+  w_hard_clear: 0.0     # new: feet below 1 cm (skimming, not just touching) stay put
   w_ankle: 5.0
   w_air: 20.0
   w_support: 15.0        # ee9b300d at 2: 0.3 feet short on average (trot-ish overlap);
                          # f8a32a8e at 6: diagonal pairs overlap, <3 planted 10% of steps
-  w_stall: 5.0           # new: at full cost a stall pays twice what the lost lin reward pays
   w_term: 50.0
   clear_height: 0.06
   hard_clear_height: 0.01
@@ -82,9 +84,6 @@ env:
                          # and the cheapest foot was one that never stepped
   air_max: 0.3
   min_support: 3
-  stall_frac: 0.5
-  stall_grace: 0.5
-  stall_ramp: 1.0
   contact_force_min: 1.0
   contact_touch_min: 0.05
   pad_tilt_max_deg: 3.0
@@ -165,4 +164,4 @@ _schedule:
       op: scale
       kind: linear
       start: 500000
-      length: 4000000      # slower ramp to the higher weight: ~2 at 1.8M, as before
+      length: 2500000      # full at 3M: 531c034f's support was still rising at 4M (ramp to 4.5M)

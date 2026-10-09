@@ -1,6 +1,6 @@
 # Foot design
 
-The magnetic foot used in `lab/rl_env` (robot and `test_foot`). Background and
+The magnetic foot used in `lab/rl` (robot and `test_foot`). Background and
 sizing arguments: `docs/projects/magnetic-foot-sim.md`. Test results: `notes.md`.
 
 ## How the foot works
@@ -41,7 +41,7 @@ sizing arguments: `docs/projects/magnetic-foot-sim.md`. Test results: `notes.md`
   electro-permanent magnet (EPM) would be. Without a switchable magnet, the foot
   would have to be levered off against the stops.
 
-## Current parameters (`config.py`, `ModelCfg`)
+## Current parameters (`config.py`, `MjModelCfg`)
 
 | Parameter | Value | Meaning |
 |---|---|---|

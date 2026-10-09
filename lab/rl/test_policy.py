@@ -1,26 +1,23 @@
 """Policy test: learn to walk forward on the floor with PPO (stable-baselines3, CPU).
 
-A runkit ``Experiment`` with three roles -- ``run`` (train), ``eval`` (one
-deterministic episode of a checkpoint) and ``viz`` (summary of a run):
+A runkit ``Experiment`` with two roles -- ``run`` (train) and ``eval`` (one
+deterministic episode of a checkpoint):
 
-    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy steps=10e6 --tag=gait
-    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy --branch 2cc9 steps=15e6  # continue
-    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy eval        # latest checkpoint
-    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy eval 2cc9   # run by id prefix
-    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy viz         # latest run
-    uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy bench       # env steps/s vs n_envs
+    uv run --extra mjx --extra sb3 python -m lab.rl.test_policy steps=10e6 --tag=gait
+    uv run --extra mjx --extra sb3 python -m lab.rl.test_policy --branch 2cc9 steps=15e6  # continue
+    uv run --extra mjx --extra sb3 python -m lab.rl.test_policy eval        # latest checkpoint
+    uv run --extra mjx --extra sb3 python -m lab.rl.test_policy eval 2cc9   # run by id prefix
     uv run --extra mjx ctk play runs/test_policy/latest/checkpoints/current/eval/rollout.npz
 
 Or through runkit, which takes the extras (mjx, sb3) and the runs root from
-``lab/rl_env/experiment.toml`` and relaunches under ``uv run`` itself (from the
-repo root; ``bench`` stays ``python -m``):
+``lab/rl/experiment.toml`` and relaunches under ``uv run`` itself (from the
+repo root):
 
-    runkit run  lab.rl_env.test_policy steps=10e6 --tag=gait
-    runkit run  lab.rl_env.test_policy --branch 2cc9 steps=15e6 env.w_support=10
-    runkit eval lab.rl_env.test_policy
+    runkit run  lab.rl.test_policy steps=10e6 --tag=gait
+    runkit run  lab.rl.test_policy --branch 2cc9 steps=15e6 env.w_support=10
+    runkit eval lab.rl.test_policy
     runkit eval runs/test_policy/latest/checkpoints/current              # no module needed
-    runkit viz  lab.rl_env.test_policy
-    cd "$(runkit latest lab.rl_env.test_policy)"                           # the latest run dir
+    cd "$(runkit latest lab.rl.test_policy)"                           # the latest run dir
 
 Branching (``--branch RUN[:CHECKPOINT]``): a new run that continues from a
 checkpoint -- the weights, the optimizer, the normalization stats and the step
@@ -52,14 +49,12 @@ plus what runkit writes when asked, plus this experiment's own files under ``out
     (older runs: model.zip at the checkpoint's top, the eval in out/eval/ and
     metrics/eval.jsonl)
 
-Config: :class:`PolicyCfg` = the robot model (``model.*``, :class:`.config.ModelCfg`
+Config: :class:`PolicyCfg` = the robot model (``mjmodel.*``, :class:`.config.MjModelCfg`
 with ``pad_cells`` defaulting to 1), the env's task / reward / curriculum (``env.*``,
 :class:`.config.WalkEnvCfg`), ``steps`` / ``n_envs``, and ``seed`` (a fresh random
 seed per run, recorded in ``config.yaml``; ``seed=<n>`` repeats a run). E.g. ``steps=5e6
-env.w_air=15 model.kp=12``. ``run`` takes ``key=value`` overrides and
-``--tag`` / ``--root`` / ``--branch``; ``eval`` and ``viz`` use the run's own
-``config.yaml``.
-``bench`` is not a runkit role (no run dir); it is dispatched here, before runkit.
+env.w_air=15 mjmodel.kp=12``. ``run`` takes ``key=value`` overrides and
+``--tag`` / ``--root`` / ``--branch``; ``eval`` uses the run's own ``config.yaml``.
 
 Environment, observation, action and reward: :mod:`.env` (:class:`WalkEnv`).
 
@@ -83,13 +78,13 @@ from pathlib import Path
 
 import numpy as np
 
-from runkit import (Checkpoint, Experiment, RunContext, load_config, load_metrics,
-                    random_seed, record, save_config)
+from runkit import (Checkpoint, Experiment, RunContext, load_config, random_seed,
+                    record, save_config)
 
-from .config import ModelCfg, WalkEnvCfg
+from .config import MjModelCfg, WalkEnvCfg
 from . import gait
 from .env import WalkEnv
-from .model import build
+from .mjmodel import build
 from .scheduled_config import ScheduledConfig, geometric, linear, scale, schedule
 
 REPO = Path(__file__).resolve().parents[2]
@@ -110,7 +105,7 @@ SUPPORT = scale(linear(start=500_000, length=2_000_000))
 class PolicyCfg:
     """Config of the policy test: model + env + training knobs + the reward schedule."""
     # one pad cell: magnets are off on the floor, extra cells only cost contacts
-    model: ModelCfg = dataclasses.field(default_factory=lambda: ModelCfg(pad_cells=1))
+    mjmodel: MjModelCfg = dataclasses.field(default_factory=lambda: MjModelCfg(pad_cells=1))
     env: WalkEnvCfg = dataclasses.field(default_factory=WalkEnvCfg)
     steps: int = 10_000_000         # PPO env steps
     n_envs: int = 12                # parallel envs (SubprocVecEnv); 12 of 16 cores
@@ -141,7 +136,7 @@ def make_env(cfg: PolicyCfg, rank: int, step: int = 0):
     Its reward config is the schedule at ``step`` (0: the start of training)."""
     def _f():
         from stable_baselines3.common.monitor import Monitor
-        return Monitor(WalkEnv(cfg.model, ScheduledConfig(cfg)(step).env, cfg.seed + rank))
+        return Monitor(WalkEnv(cfg.mjmodel, ScheduledConfig(cfg)(step).env, cfg.seed + rank))
     return _f
 
 
@@ -405,7 +400,7 @@ def evaluate(ckpt: Checkpoint) -> dict:
     # the policy only understands normalized observations. Freeze the statistics
     # (training=False) and keep rewards raw (norm_reward=False).
     venv = VecNormalize.load(str(ckpt.state / "vecnormalize.pkl"),
-                             DummyVecEnv([lambda: WalkEnv(cfg.model, cfg.env, cfg.seed)]))
+                             DummyVecEnv([lambda: WalkEnv(cfg.mjmodel, cfg.env, cfg.seed)]))
     venv.training, venv.norm_reward = False, False
     model = PPO.load(ckpt.state / "model.zip", device="cpu")
 
@@ -419,7 +414,7 @@ def evaluate(ckpt: Checkpoint) -> dict:
     # Per policy step: the simulation state (qpos, qvel, ctrl, for the replay) and the
     # per-foot contact state from the env's info (normal force, planted, position).
     log = {k: [] for k in ("qpos", "qvel", "ctrl", "force", "planted", "foot_pos")}
-    ret, vx, stall = 0.0, [], []
+    ret, vx = 0.0, []
     for _ in range(env.max_steps):
         act, _ = model.predict(venv.normalize_obs(obs), deterministic=True)
         obs, r, terminated, truncated, info = env.step(act)
@@ -433,7 +428,6 @@ def evaluate(ckpt: Checkpoint) -> dict:
         # the env's raw reward (not normalized) and the forward speed in the body frame
         ret += float(r)
         vx.append(info["vx"])
-        stall.append(-info["terms"]["stall"] / env.dt)     # stall cost per second, >= 0
         if terminated or truncated:
             break
 
@@ -482,88 +476,15 @@ def evaluate(ckpt: Checkpoint) -> dict:
     (eval_dir / "eval.yaml").write_text(yaml.safe_dump(summary, sort_keys=False))
 
     # The replay for `ctk play`: the logged episode (npz) with the time per frame and
-    # the path of the model it ran on, written next to it as MJCF (xml). The stall cost
-    # (w_stall * ramp) goes in as the live plot.
+    # the path of the model it ran on, written next to it as MJCF (xml).
     xml = eval_dir / "rollout.xml"
-    spec, _ = build(cfg.model, write=False)
+    spec, _ = build(cfg.mjmodel, write=False)
     xml.write_text(spec.to_xml())
     np.savez(eval_dir / "rollout.npz", **{k: np.asarray(v) for k, v in log.items()},
-             timestep=env.dt, model=_rel(xml), plot=np.asarray(stall)[:, None],
-             plot_labels=["stall"], plot_title="stall cost")
+             timestep=env.dt, model=_rel(xml))
     print(f"saved {_rel(eval_dir)}/eval.yaml, rollout.npz (+ .xml)")
     return summary
 
 
-@exp.viz
-def show(cfg: PolicyCfg, ctx: RunContext) -> None:
-    """How did this run go: status, last progress row, eval summary, what to open."""
-    import yaml
-    d, out = ctx.dir, ctx.out
-    status = yaml.safe_load((d / "status.yaml").read_text()) if (d / "status.yaml").exists() else {}
-    print(f"status   {status.get('status')}  started {status.get('started')}  "
-          f"duration {status.get('duration_s')} s  seed {cfg.seed}")
-    if status.get("total"):
-        print(f"steps    {status.get('progress') or 0:,} of {status['total']:,}  "
-              f"latest checkpoint {status.get('checkpoint')}")
-    rows = load_metrics(d, "run")
-    if rows:
-        r = rows[-1]
-        print(f"progress it {r['it']}, {r['steps'] / 1e6:.2f}M steps: return "
-              f"{r['ep_return']:.2f}, vx {r['vx']:.3f} (cmd {r.get('cmd_vx', cfg.env.cmd_vx)}), "
-              f"duty {r['duty']:.2f}, air {r['air_s']:.2f} s")
-        srows = load_metrics(d, "schedule")               # older runs: schedule/<path> in run
-        sched = ({k: v for k, v in srows[-1].items() if not k.startswith("_")
-                  and k not in ("it", "steps")} if srows else
-                 {k[len("schedule/"):]: v for k, v in r.items() if k.startswith("schedule/")})
-        if sched:
-            print("schedule " + ", ".join(f"{k} {v:.2f}" for k, v in sched.items()))
-        _plot(rows, out / "progress.png", reward_rows=load_metrics(d, "reward"),
-              cmd_vx=rows[0].get("cmd_vx", cfg.env.cmd_vx),
-              air_target=rows[0].get("air_target", cfg.env.air_target))   # needs >= 2 rows
-        if (out / "progress.png").exists():
-            print(f"curve    {_rel(out / 'progress.png')}")
-    else:
-        print("progress none yet")
-    # the eval of the latest checkpoint; older runs kept it in out/eval/
-    ckpts = ctx.checkpoints()
-    eval_dir = ckpts[-1].eval if ckpts else None
-    if eval_dir is None or not (eval_dir / "eval.yaml").exists():
-        eval_dir = out / "eval" if (out / "eval" / "eval.yaml").exists() else None
-    if eval_dir is not None:
-        e = yaml.safe_load((eval_dir / "eval.yaml").read_text())
-        print(f"eval     vx {e['vx']} (cmd {e['cmd_vx']}), distance {e['distance']} m, "
-              f"duty {e['duty']}, return {e['return']}")
-        print(f"replay   uv run --extra mjx ctk play {_rel(eval_dir / 'rollout.npz')}")
-    elif ckpts:
-        print(f"eval     none yet -- runkit eval {_rel(ckpts[-1].dir)}")
-    else:
-        print("eval     none yet -- no checkpoint to evaluate")
-
-
-def bench(cfg: PolicyCfg, secs: float = 5.0) -> None:
-    """Random-action env steps/s for several n_envs (SubprocVecEnv)."""
-    from stable_baselines3.common.vec_env import SubprocVecEnv
-    for n in (1, 4, 8, 12, 14, 16):
-        venv = SubprocVecEnv([make_env(cfg, s) for s in range(n)])
-        venv.reset()
-        acts = np.zeros((n, 12), np.float32)
-        k, t0 = 0, time.time()
-        while time.time() - t0 < secs:
-            venv.step(acts + np.random.uniform(-0.3, 0.3, acts.shape).astype(np.float32))
-            k += 1
-        print(f"n_envs {n:2d}: {k * n / (time.time() - t0):7.0f} env steps/s", flush=True)
-        venv.close()
-
-
-def entry(argv: list[str]) -> None:
-    """``bench [key=value ...]`` here; everything else (run / eval / viz / root /
-    latest) goes to runkit."""
-    if argv and argv[0] == "bench":
-        from runkit.config import build_cfg, parse_overrides
-        bench(build_cfg(PolicyCfg, parse_overrides(argv[1:])))
-    else:
-        exp.main(argv)
-
-
 if __name__ == "__main__":
-    entry(sys.argv[1:])
+    exp.main(sys.argv[1:])

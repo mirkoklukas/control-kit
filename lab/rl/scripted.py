@@ -15,12 +15,12 @@ import jax.numpy as jnp
 import mujoco
 import numpy as np
 
-from .config import ModelCfg, ScriptedCfg
-from .model import adhesion_actuators, gravity, make_robot, pad_cell_bodies
+from .config import MjModelCfg, ScriptedCfg
+from .mjmodel import adhesion_actuators, gravity, make_robot, pad_cell_bodies
 from .poses import leg_angles, rest_height
 
 
-def height_schedule(cfg: ModelCfg, scfg: ScriptedCfg, dt: float) -> np.ndarray:
+def height_schedule(cfg: MjModelCfg, scfg: ScriptedCfg, dt: float) -> np.ndarray:
     """Base-height targets per sim step: hold, lift, hold, lower, hold."""
     h0, h1 = rest_height(cfg), cfg.stand_height
     hold_ = np.full(int(scfg.hold_time / dt), 0.0)
@@ -53,12 +53,12 @@ def pad_forces(model: mujoco.MjModel, data: mujoco.MjData, body_leg: np.ndarray,
     return out
 
 
-def simulate(model: mujoco.MjModel, cfg: ModelCfg, start: str, servo: np.ndarray,
+def simulate(model: mujoco.MjModel, cfg: MjModelCfg, start: str, servo: np.ndarray,
              adhesion, grav: np.ndarray | None = None) -> dict:
     """Step the model from keyframe ``start`` under open-loop commands.
 
     Args:
-        model: compiled model (from :func:`.model.build`). Its gravity is modified
+        model: compiled model (from :func:`.mjmodel.build`). Its gravity is modified
             in place when ``grav`` is given.
         cfg: model config.
         start: keyframe name.
@@ -102,12 +102,12 @@ def simulate(model: mujoco.MjModel, cfg: ModelCfg, start: str, servo: np.ndarray
     return {k: np.asarray(v) for k, v in log.items()}
 
 
-def standup(model: mujoco.MjModel, cfg: ModelCfg, scfg: ScriptedCfg, *,
+def standup(model: mujoco.MjModel, cfg: MjModelCfg, scfg: ScriptedCfg, *,
             adhesion: float = 0.0) -> dict:
     """rest -> stand -> rest from the ``rest`` keyframe. Adds ``height_target``.
 
     Args:
-        model: compiled model (from :func:`.model.build`).
+        model: compiled model (from :func:`.mjmodel.build`).
         cfg: model config.
         scfg: timing (``transition_time``, ``hold_time``).
         adhesion: constant adhesion ctrl in [0, 1] on every foot.
@@ -122,7 +122,7 @@ def standup(model: mujoco.MjModel, cfg: ModelCfg, scfg: ScriptedCfg, *,
     return log
 
 
-def hold(model: mujoco.MjModel, cfg: ModelCfg, scfg: ScriptedCfg, *, tilt_deg: float,
+def hold(model: mujoco.MjModel, cfg: MjModelCfg, scfg: ScriptedCfg, *, tilt_deg: float,
          adhesion: float = 1.0, sweep: bool = False) -> dict:
     """Hold ``stand`` under tilted gravity. Adds ``tilt_deg`` (T,).
 
@@ -131,7 +131,7 @@ def hold(model: mujoco.MjModel, cfg: ModelCfg, scfg: ScriptedCfg, *, tilt_deg: f
     then holds for ``hold_duration``.
 
     Args:
-        model: compiled model (from :func:`.model.build`).
+        model: compiled model (from :func:`.mjmodel.build`).
         cfg: model config.
         scfg: timing (``hold_duration``, ``sweep_time``).
         tilt_deg: final gravity tilt (0 floor, 90 wall, 180 ceiling).

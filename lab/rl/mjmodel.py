@@ -15,7 +15,7 @@ foot y-axis) / ``ankle{i}_b`` (foot z), pad body ``pad{i}`` with cell bodies
 along the tibia, so the pad face (normal +x) is perpendicular to the tibia at ankle
 neutral.
 
-Parameters: every number is a field of :class:`.config.ModelCfg` (``config.py``),
+Parameters: every number is a field of :class:`.config.MjModelCfg` (``config.py``),
 except the scene's gravity tilt, which is an argument of :func:`build` (only the tilt
 test tilts). None is hardcoded here. Where each one lands in the model:
 
@@ -37,7 +37,7 @@ test tilts). None is hardcoded here. Where each one lands in the model:
 - Keyframes (``poses.py``): ``stand_foot_radius``, ``stand_height``,
   ``rest_clearance``.
 
-Override any of them per run: ``python -m lab.rl_env.test_tilt model.ankle_range_deg=45``.
+Override any of them per run: ``python -m lab.rl.test_tilt mjmodel.ankle_range_deg=45``.
 """
 from __future__ import annotations
 
@@ -50,7 +50,7 @@ import numpy as np
 
 from controlkit.kinematics import Leg3DOF, Robot, radial_mounts
 
-from .config import ModelCfg
+from .config import MjModelCfg
 
 MODELS_DIR = Path(__file__).parent / "models"
 
@@ -62,7 +62,7 @@ _RGBA = {
 }
 
 
-def make_robot(cfg: ModelCfg) -> Robot:
+def make_robot(cfg: MjModelCfg) -> Robot:
     """The 4x3-DOF spider as a kinematic :class:`Robot`."""
     leg = Leg3DOF.from_lengths(
         jnp.asarray(cfg.leg_lengths),
@@ -71,7 +71,7 @@ def make_robot(cfg: ModelCfg) -> Robot:
     return Robot(mounts=radial_mounts(cfg.num_legs, radius=cfg.mount_radius), leg=leg)
 
 
-def _add_foot(spec: mujoco.MjSpec, cfg: ModelCfg, i: int) -> None:
+def _add_foot(spec: mujoco.MjSpec, cfg: MjModelCfg, i: int) -> None:
     """Replace leg ``i``'s sphere foot with a Cardan ankle + pad + adhesion."""
     foot = spec.body(f"foot{i}")
     for g in list(foot.geoms):
@@ -135,7 +135,7 @@ def adhesion_actuators(model: mujoco.MjModel, i: int) -> np.ndarray:
     return np.array([a for a in range(model.nu) if model.actuator(a).name.startswith(f"adhere{i}_")])
 
 
-def robot_spec(cfg: ModelCfg) -> mujoco.MjSpec:
+def robot_spec(cfg: MjModelCfg) -> mujoco.MjSpec:
     """The robot alone (no floor), with ankles, pads and adhesion actuators.
 
     Actuator order: the ``num_legs * 3`` leg servos (leg-major), then the adhesion
@@ -174,7 +174,7 @@ def gravity(tilt_deg: float) -> list[float]:
     return [9.81 * math.sin(th), 0.0, -9.81 * math.cos(th)]
 
 
-def add_flat_scene(spec: mujoco.MjSpec, cfg: ModelCfg, tilt_deg: float = 0.0) -> mujoco.MjSpec:
+def add_flat_scene(spec: mujoco.MjSpec, cfg: MjModelCfg, tilt_deg: float = 0.0) -> mujoco.MjSpec:
     """Add floor, light, sim options and gravity to ``spec``, in place.
 
     Args:
@@ -201,7 +201,7 @@ def add_flat_scene(spec: mujoco.MjSpec, cfg: ModelCfg, tilt_deg: float = 0.0) ->
     return spec
 
 
-def build(cfg: ModelCfg, *, tilt_deg: float = 0.0, write: bool = True):
+def build(cfg: MjModelCfg, *, tilt_deg: float = 0.0, write: bool = True):
     """Robot + flat scene + ``rest``/``stand`` keyframes.
 
     Args:

@@ -13,12 +13,22 @@ Environment (Gymnasium):
 - Reset: ``stand`` keyframe + uniform joint noise ``reset_noise``.
 - Action (12,) in [-1, 1]: joint position targets = ``stand`` + ``action_scale`` *
   action, clipped to the joint limits, sent to the leg servos.
-- Observation (77,): gravity in the body frame (3), base linear velocity (3) and
-  angular velocity (3) in the body frame, joint positions relative to ``stand`` (12)
-  and velocities (12), ankle angles (8), previous action (12), command (3), foot
-  (ankle pivot) positions relative to the base in the body frame (12), pad face
-  heights above the floor (4), planted flags (4), time behind the minimum pace as a
-  fraction of the time to full stall cost (1), capped at 1.
+- Observation, chosen by ``cfg.obs`` (fixed at construction: it sets the network's
+  input size):
+
+  - ``"v1"`` (101,), default: after Hwangbo et al. 2019, *Learning Agile and Dynamic
+    Motor Skills for Legged Robots* (arXiv:1901.08652). Gravity in the body frame (3),
+    base height (1), base linear and angular velocity in the body frame (3 + 3), joint
+    positions relative to ``stand`` (12) and velocities (12), joint history (48):
+    position error (servo target - joint angle) and velocity 1 and 2 policy steps
+    back (the paper: t - 0.01 s and t - 0.02 s; here t - 0.02 s and t - 0.04 s, one
+    and two steps at 50 Hz), previous action (12), command (3). New, not in the
+    paper: pad face heights above the floor (4).
+  - ``"v2"`` (76,): gravity in the body frame (3), base linear velocity (3) and
+    angular velocity (3) in the body frame, joint positions relative to ``stand``
+    (12) and velocities (12), ankle angles (8), previous action (12), command (3),
+    foot (ankle pivot) positions relative to the base in the body frame (12), pad
+    face heights above the floor (4), planted flags (4).
 
 Reward (docs/policy-and-reward-terms.md; the terms are pure functions in
 :mod:`.rewards`, composed in :meth:`WalkEnv.step`), every term times the policy dt:
@@ -33,7 +43,6 @@ Reward (docs/policy-and-reward-terms.md; the terms are pure functions in
         - w_slip sum_planted (|v_t,i| + r_pad |w_n,i|)
         - w_ankle sum_planted sum_ab max(0, |q| - q_safe)^2
         - w_support max(0, min_support - n_planted)
-        - w_stall ramp(t_behind; stall_grace, stall_ramp)
     K(x) = 4 / (e^x + 2 + e^-x)   (1 at x = 0)
 
 The weights are used as given. Changing them over training (a curriculum) is the
@@ -50,14 +59,6 @@ position (``foot_pos_hist``, ankle pivot), and per-foot timers (``air_time``,
 ``contact_touch_min``. Touching but not planted (light, or on a tilted pad): the drag
 term. The air-time and
 support terms read from it.
-
-Stall (:class:`ProgressDebt`): the distance ``L`` the base lags behind the minimum
-pace ``stall_frac * |cmd_xy|`` along the command, from the base displacement per step;
-``L = max over windows ending now of (distance at minimum pace - distance covered)``.
-Surplus is forgotten, shortfalls are not, so moving back and forth does not help.
-``t_behind = L / min pace``; the cost ramps up with it (:func:`.rewards.ramp`), and it is
-in the observation, so the reward stays Markov. :class:`ViolationTimer` (time a
-condition has been violated continuously) is the same pattern for other costs.
 
 Termination (cost ``w_term``): trunk touches the floor, or the body tips more than
 ``tip_deg`` from vertical. Truncation at ``episode_s``.
@@ -77,64 +78,8 @@ import mujoco
 import numpy as np
 
 from . import rewards as rw
-from .config import ModelCfg, WalkEnvCfg
-from .model import adhesion_actuators, build, pad_cell_bodies
-
-class ViolationTimer:
-    """Time a condition has been violated continuously: reset to 0 while it holds.
-
-    Args:
-        shape: shape of the condition (``()`` for one scalar condition, ``(4,)`` per foot).
-    """
-
-    def __init__(self, shape=()):
-        self.t = np.zeros(shape)
-
-    def reset(self):
-        self.t = np.zeros_like(self.t)
-
-    def update(self, ok, dt):
-        """Advance by one step of ``dt`` seconds.
-
-        Args:
-            ok: bool (``shape``), condition satisfied this step.
-            dt: step length (s).
-
-        Returns:
-            The updated violation time (s).
-        """
-        self.t = np.where(ok, 0.0, self.t + dt)
-        return self.t
-
-
-class ProgressDebt:
-    """Distance lagging behind a minimum pace (a CUSUM): ``L <- max(0, L + v_min dt - dl)``.
-
-    Equals the largest shortfall, over all windows ending now, of the distance covered
-    against ``v_min`` times the window length. A shortfall stays until it is covered;
-    progress beyond the pace is not banked.
-    """
-
-    def __init__(self):
-        self.L = 0.0
-
-    def reset(self):
-        self.L = 0.0
-
-    def update(self, dl, v_min, dt):
-        """Advance by one step.
-
-        Args:
-            dl: distance covered along the command this step (m; negative = backwards).
-            v_min: minimum pace (m/s).
-            dt: step length (s).
-
-        Returns:
-            The time behind the pace, ``L / v_min`` (s; 0 if ``v_min`` is 0).
-        """
-        self.L = max(0.0, self.L + v_min * dt - dl)
-        return self.L / v_min if v_min > 0 else 0.0
-
+from .config import MjModelCfg, WalkEnvCfg
+from .mjmodel import adhesion_actuators, build, pad_cell_bodies
 
 class WalkEnv(gym.Env):
     """The spider on the floor, tracking a forward velocity. See the module docstring.
@@ -144,23 +89,24 @@ class WalkEnv(gym.Env):
     (its reward schedule; see the module docstring).
 
     Args:
-        mcfg: the robot model (:class:`.config.ModelCfg`).
+        mjcfg: the robot model (:class:`.config.MjModelCfg`).
         cfg: task and reward (:class:`.config.WalkEnvCfg`).
         seed: seed for the first ``reset()`` if that call gives none.
     """
 
     metadata = {"render_modes": []}
 
-    def __init__(self, mcfg: ModelCfg, cfg: WalkEnvCfg, seed: int = 0):
-        self.mcfg = mcfg                                  # the robot model
+    def __init__(self, mjcfg: MjModelCfg, cfg: WalkEnvCfg, seed: int = 0):
+        self.mjcfg = mjcfg                                # the robot model
         self.cfg = cfg                                    # task + reward (property: derives constants)
 
         # --- model and timing ---
-        _, self.model = build(mcfg, write=False)          # robot + floor + keyframes
+        _, self.model = build(mjcfg, write=False)         # robot + floor + keyframes
         m = self.model
         self.data = mujoco.MjData(m)
         # physics steps per policy step (e.g. 10 x 2 ms = 20 ms at 50 Hz)
-        self.n_sub = max(1, round(1.0 / (cfg.policy_hz * mcfg.timestep)))
+        # §`policy_hz * timestep` means policy_cycles-per-timestep
+        self.n_sub = max(1, round(1.0 / (cfg.policy_hz * mjcfg.timestep)))
         self.dt = self.n_sub * m.opt.timestep            # policy step (s)
         self.max_steps = int(cfg.episode_s / self.dt)    # episode length (policy steps)
 
@@ -198,13 +144,16 @@ class WalkEnv(gym.Env):
         # --- constants for the reward and termination ---
         # height of the ankle pivot above a flat pad's contact face: foot height = pivot
         # height - this
-        self.pad_drop = mcfg.pivot_height + mcfg.pad_thickness
-        self.r_pad = 0.5 * mcfg.pad_size                  # turns pad yaw rate into edge speed
+        self.pad_drop = mjcfg.pivot_height + mjcfg.pad_thickness
+        self.r_pad = 0.5 * mjcfg.pad_size                  # turns pad yaw rate into edge speed
         # (constants from `cfg` -- q_safe, cos_pad_flat, cos_tip, cmd -- see the cfg setter)
 
         # --- gym spaces ---
         self.action_space = gym.spaces.Box(-1.0, 1.0, (12,), np.float32)
-        self.observation_space = gym.spaces.Box(-np.inf, np.inf, (77,), np.float32)
+        # the observation: v1 (after Hwangbo et al. 2019) or v2; see the module docstring
+        self._obs = {"v1": self._obs_v1, "v2": self._obs_v2}[cfg.obs]
+        n_obs = {"v1": 101, "v2": 76}[cfg.obs]
+        self.observation_space = gym.spaces.Box(-np.inf, np.inf, (n_obs,), np.float32)
 
         # --- per-episode state (set properly in reset) ---
         self._seed = seed                  # used for the first reset if none is given
@@ -218,9 +167,9 @@ class WalkEnv(gym.Env):
         self.planted = np.zeros(4, bool)   # foot planted at the latest step
         self.air_time = np.zeros(4)        # time since lift-off (0 while planted), s
         self.planted_time = np.zeros(4)    # time since touchdown (0 while in the air), s
-        self.stall = ProgressDebt()        # distance behind the minimum pace, m
-        self.t_behind = 0.0                # ... as time at that pace, s
-        self.base_pos = np.zeros(3)        # base position at the previous step (world)
+        # joint history (obs v1): [position error, velocity] (24,) at the end of the
+        # previous policy step (row 0) and the one before (row 1)
+        self.joint_hist = np.zeros((2, 24))
 
         # scratch buffers for MuJoCo calls that write into an array
         self._vel, self._cf = np.zeros(6), np.zeros(6)
@@ -239,8 +188,8 @@ class WalkEnv(gym.Env):
         self.cos_pad_flat = math.cos(math.radians(cfg.pad_tilt_max_deg))  # planted: pad flat
         self.cos_tip = math.cos(math.radians(cfg.tip_deg))
         self.cmd = np.array([cfg.cmd_vx, 0.0, 0.0])   # command: (vx, vy, yaw rate), body frame
-        # not re-derived (fixed at construction): policy_hz / episode_s (timing) and
-        # contact_history (buffer size)
+        # not re-derived (fixed at construction): policy_hz / episode_s (timing),
+        # contact_history (buffer size) and obs (observation layout)
 
     # ------------------------------------------------------------------ helpers
     def _base_frame(self):
@@ -256,10 +205,34 @@ class WalkEnv(gym.Env):
         w_body = self.data.qvel[3:6]         # free joint: angular velocity already in body
         return R, v_body, w_body
 
-    def _obs(self):
-        """The observation (77,), float32. Layout: see the module docstring."""
+    def _joint_state(self):
+        """Leg joint position error (servo target - joint angle) and velocity, (24,)."""
+        d = self.data
+        q = d.qpos[self.jnt_qadr]
+        return np.concatenate([d.ctrl[:12] - q, d.qvel[self.jnt_vadr]])
+
+    def _obs_v1(self):
+        """The observation v1 (101,), float32: after Hwangbo et al. 2019
+        (arXiv:1901.08652), plus foot heights. Layout: see the module docstring."""
         R, v, w = self._base_frame()
-        d, cfg = self.data, self.cfg
+        d = self.data
+        return np.concatenate([
+            R.T @ np.array([0.0, 0.0, -1.0]),                     # gravity direction, body (3)
+            [d.qpos[2]],                                          # base height (1)
+            v, w,                                                 # base velocities, body (3 + 3)
+            d.qpos[self.jnt_qadr] - self.qpos0[self.jnt_qadr],    # leg joints rel. `stand` (12)
+            d.qvel[self.jnt_vadr],                                # leg joint velocities (12)
+            self.joint_hist.ravel(),                              # joint history, t-1, t-2 (48)
+            self.prev_action,                                     # previous action (12)
+            self.cmd,                                             # command (3)
+            # new, not in the paper: pad face heights above the floor (4)
+            d.xpos[self.feet, 2] - self.pad_drop,
+        ]).astype(np.float32)
+
+    def _obs_v2(self):
+        """The observation v2 (76,), float32. Layout: see the module docstring."""
+        R, v, w = self._base_frame()
+        d = self.data
         foot = d.xpos[self.feet]                                  # ankle pivots, world (4, 3)
         return np.concatenate([
             R.T @ np.array([0.0, 0.0, -1.0]),                     # gravity direction, body (3)
@@ -272,7 +245,6 @@ class WalkEnv(gym.Env):
             ((foot - d.xpos[self.base]) @ R).ravel(),             # feet rel. base, body (12)
             foot[:, 2] - self.pad_drop,                           # pad face above floor (4)
             self.planted,                                         # planted flags (4)
-            [min(self.t_behind / (cfg.stall_grace + cfg.stall_ramp), 1.0)],  # time behind (1)
         ]).astype(np.float32)
 
     def _contact_state(self):
@@ -392,36 +364,69 @@ class WalkEnv(gym.Env):
         self.foot_pos_hist = np.zeros((self.cfg.contact_history, 4, 3))
         self.planted = self._planted(force)
         self.air_time, self.planted_time = np.zeros(4), np.zeros(4)
-        self.stall.reset()
-        self.t_behind = 0.0
-        self.base_pos = d.qpos[0:3].copy()
+        # joint history: both rows = the reset state (no fake jump in the first steps)
+        self.joint_hist = np.tile(self._joint_state(), (2, 1))
         return self._obs(), {}
 
     def step(self, action):
-        """Apply one action for one policy step, then score the result.
+        """Apply one action for one control step, then score the result.
+
+        One control step = the action's servo targets held for ``n_sub`` sim steps
+        (``dt`` seconds in total).
 
         Args:
             action: (12,) in [-1, 1] (clipped): offsets from the `stand` servo targets,
                 in units of ``action_scale`` rad.
 
         Returns:
-            ``(observation, reward, terminated, truncated, info)``. ``info`` carries
-            ``terms`` (each reward term, already times dt), ``vx`` (forward speed,
-            body frame), ``force`` (per-foot normal force), ``planted`` (per-foot
-            bool), ``foot_pos`` ((4, 3) world positions of the ankle pivots) and
-            ``air_td`` (air times of this step's touchdowns) and ``t_behind``
-            (time behind the minimum pace, s), for logging.
+            A tuple ``(observation, reward, terminated, truncated, info)``, the
+            Gymnasium API (>= 0.26):
+
+            observation: the next observation (see :meth:`_obs`).
+            reward: the sum of the reward terms for this step (each already times dt).
+            terminated: the episode ended by the task itself -- a true terminal
+                state. Here: the trunk touches the floor, or the body tips more
+                than ``tip_deg``. Nothing comes after it, so the learner uses no
+                value beyond this step (the value target is just the reward).
+            truncated: the episode was cut off from outside the task -- here the
+                time limit, ``episode_s``. The robot could have gone on, so the
+                learner bootstraps from the value of the last observation (SB3 does
+                this via ``TimeLimit.truncated`` / ``terminal_observation``). Reported
+                as ``terminated`` instead, every episode would end in a fake "nothing
+                after this" state the policy cannot see coming (it has no clock).
+            info: per-step values for logging:
+                terms: each reward term, already times dt (dict).
+                vx: forward speed, body frame (m/s).
+                force: per-foot pad normal force (4,), N.
+                planted: per-foot planted, loaded and pad flat (4,) bool.
+                foot_pos: world positions of the ankle pivots (4, 3), m.
+                air_td: air times of this step's touchdowns (list, s).
+
+        Note:
+            ``truncated`` could instead be left to Gymnasium's ``TimeLimit`` wrapper
+            (``max_episode_steps``); keeping it here keeps ``episode_s`` in the config.
         """
         cfg, m, d = self.cfg, self.model, self.data
 
-        # --- act: set the servo targets, hold them for n_sub physics steps ---
+        # -- Joint history ---
+        # Current state becomes history and is then updated
+        # push the state at the end of the previous step (its targets
+        # still in ctrl), before the new action overwrites them. 
+        self.joint_hist = np.stack([self._joint_state(), self.joint_hist[0]])
+
+        # --- Act ---
+        # Translate action to control (here already done)
+        # Set the servo targets, hold them for n_sub physics steps
         a = np.clip(np.asarray(action, dtype=float), -1.0, 1.0)
         d.ctrl[:12] = np.clip(self.servo0 + cfg.action_scale * a, self.ctrl_lo, self.ctrl_hi)
-        for _ in range(self.n_sub):
+        # `n_sub = "mj_steps_per_gym_step" = gym_dt/mj_dt `
+        for _ in range(self.n_sub): 
             mujoco.mj_step(m, d)
         self.steps += 1
 
-        # --- observe the result: body state, contacts, termination ---
+        # --- Observe and Asses the Result ---
+        # I.e. body state, contacts, termination
+        observation = self._obs()
         R, v, w = self._base_frame()
         force, trunk = self._contact_state()
         feet, touchdown, air_td = self._update_contact_history(force)   # feet = planted
@@ -432,7 +437,8 @@ class WalkEnv(gym.Env):
         terminated = bool(trunk or tipped)
         truncated = self.steps >= self.max_steps
 
-        # --- gather the inputs of the reward terms (the MuJoCo side) ---
+        # --- Reward ---
+        # Gather the inputs of the reward terms (the MuJoCo side) ---
         tau = d.actuator_force[:12]                           # servo torques (N m)
         v_t, w_n, h = np.zeros(4), np.zeros(4), np.zeros(4)   # per foot
         for i in range(4):
@@ -441,14 +447,8 @@ class WalkEnv(gym.Env):
             w_n[i] = wv[2]                                    # twist about the floor normal
             h[i] = d.xpos[self.feet[i], 2] - self.pad_drop    # pad face above the floor
         q_ankle = d.qpos[self.ank_qadr].reshape(4, 2)         # (a, b) per foot
-        # stall: base displacement this step, body frame, along the command direction d
-        speed = np.linalg.norm(self.cmd[:2])                  # commanded speed s
-        dx = R.T @ (d.qpos[0:3] - self.base_pos)
-        self.base_pos = d.qpos[0:3].copy()
-        dl = dx[:2] @ self.cmd[:2] / speed if speed > 0 else 0.0
-        self.t_behind = self.stall.update(dl, cfg.stall_frac * speed, self.dt)
 
-        # --- the reward terms (rewards.py): +w * reward, -w * cost ---
+        # The reward terms (rewards.py): +w * reward, -w * cost
         terms = {
             # tracking (rewards): forward velocity and yaw rate vs. the command
             "lin": cfg.w_lin * rw.lin_vel_tracking(v[:2], self.cmd[:2], cfg.lin_sharpness),
@@ -458,7 +458,7 @@ class WalkEnv(gym.Env):
             "action_rate": -cfg.w_action_rate * rw.action_rate(a, self.prev_action),
             "joint_speed": -cfg.w_joint_speed * rw.joint_speed(d.qvel[self.jnt_vadr]),
             "orient": -cfg.w_orient * rw.orientation(R[:, 2]),
-            "height": -cfg.w_height * rw.body_height(d.qpos[2], self.mcfg.stand_height),
+            "height": -cfg.w_height * rw.body_height(d.qpos[2], self.mjcfg.stand_height),
             # feet (costs): clearance in the air, drag when touching without load,
             # slip and ankle range when planted
             "clear": -cfg.w_clear * rw.foot_clearance(h, v_t, touching, cfg.clear_height),
@@ -471,8 +471,6 @@ class WalkEnv(gym.Env):
             # (can be negative: a step shorter than air_target costs)
             "support": -cfg.w_support * rw.min_support(feet, cfg.min_support),
             "air": cfg.w_air * rw.air_time(touchdown, air_td, cfg.air_target, cfg.air_max),
-            # stalling (cost): ramps up with the time behind the minimum pace
-            "stall": -cfg.w_stall * rw.ramp(self.t_behind, cfg.stall_grace, cfg.stall_ramp),
         }
         # per step -> times dt; plain floats from here on (for logging / the return value)
         terms = {k: float(v_ * self.dt) for k, v_ in terms.items()}
@@ -480,7 +478,8 @@ class WalkEnv(gym.Env):
         reward = float(sum(terms.values()))
 
         self.prev_action = a
+        
         info = {"terms": terms, "vx": float(v[0]), "force": force.copy(),
                 "planted": feet.copy(), "foot_pos": d.xpos[self.feet].copy(),
-                "air_td": air_td[touchdown].tolist(), "t_behind": self.t_behind}
-        return self._obs(), reward, terminated, truncated, info
+                "air_td": air_td[touchdown].tolist()}
+        return observation, reward, terminated, truncated, info

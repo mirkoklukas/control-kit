@@ -1,6 +1,6 @@
 # Proposal: `ScheduledConfig` -- config values that follow a schedule
 
-Status: implemented 2026-09-28 in `lab/rl_env/scheduled_config.py` (scale / lerp; linear /
+Status: implemented 2026-09-28 in `lab/rl/scheduled_config.py` (scale / lerp; linear /
 geometric / step; wiring: the training callback pushes `sc(step).env` into the envs). Was: proposal, rewritten 2026-09-28 (notation: top-level `_schedule`; names `ScheduledConfig` / `_schedule` chosen the same day). Nothing implemented. Records where the
 discussion landed and what is still open.
 
@@ -252,5 +252,5 @@ In a JAX / MJX port the step would live in the env state, Isaac-style.)
   performance levels or open-ended runs have no [0, 1]. Hence `steps` as the default.
 - **Geometric per what**: Hwangbo's k_c grows per PPO iteration; in training steps that
   is `x0 ** (rate ** (step / steps_per_iteration))` -- `per` as a parameter.
-- **Where `ScheduledConfig` lives**: `lab/rl_env` first; `controlkit` or runkit once it is
+- **Where `ScheduledConfig` lives**: `lab/rl` first; `controlkit` or runkit once it is
   generic and proven.

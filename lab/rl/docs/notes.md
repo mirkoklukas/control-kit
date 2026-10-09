@@ -1,4 +1,4 @@
-# rl_env — notes (scratchpad)
+# rl — notes (scratchpad)
 
 4x3-DOF spider (hip-yaw / hip-pitch / knee) with passive Cardan ankles and
 magnetic pads. Plain MuJoCo on CPU for now. Goal right now: narrow down foot
@@ -10,21 +10,20 @@ Foot: `foot_design.md` (how it works, parameters, MuJoCo model + quirks).
 ## Commands
 
 ```bash
-uv run --extra mjx python -m lab.rl_env.test_tilt                            # standup: rest -> stand -> rest
-uv run --extra mjx python -m lab.rl_env.test_tilt test=hold tilt_deg=90      # hold stand on a "wall", adhesion on
-uv run --extra mjx python -m lab.rl_env.test_tilt test=hold tilt_deg=180     # ceiling
-uv run --extra mjx python -m lab.rl_env.test_tilt test=sweep tilt_deg=180    # tilt gravity 0 -> 180, then hold
-uv run --extra mjx python -m lab.rl_env.test_tilt model.ankle_range_deg=45 model.kp=30   # nested fields: dotted keys
-uv run --extra mjx python -m lab.rl_env.test_foot                            # foot pull test, a row of fixtures
-uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy steps=10e6 --tag=gait    # PPO walk forward (runkit run)
-uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy --branch <id prefix> steps=15e6   # continue a run
-uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy eval [<id prefix>]       # latest checkpoint -> its eval/
-uv run --extra mjx --extra sb3 python -m lab.rl_env.test_policy viz [<id prefix>]        # summary of a run
-uv run --extra mjx ctk play runs/rl_env/test_tilt_hold-90.npz               # replay a test (relaunches under mjpython)
+uv run --extra mjx python -m lab.rl.test_tilt                            # standup: rest -> stand -> rest
+uv run --extra mjx python -m lab.rl.test_tilt test=hold tilt_deg=90      # hold stand on a "wall", adhesion on
+uv run --extra mjx python -m lab.rl.test_tilt test=hold tilt_deg=180     # ceiling
+uv run --extra mjx python -m lab.rl.test_tilt test=sweep tilt_deg=180    # tilt gravity 0 -> 180, then hold
+uv run --extra mjx python -m lab.rl.test_tilt mjmodel.ankle_range_deg=45 mjmodel.kp=30   # nested fields: dotted keys
+uv run --extra mjx python -m lab.rl.test_foot                            # foot pull test, a row of fixtures
+uv run --extra mjx --extra sb3 python -m lab.rl.test_policy steps=10e6 --tag=gait    # PPO walk forward (runkit run)
+uv run --extra mjx --extra sb3 python -m lab.rl.test_policy --branch <id prefix> steps=15e6   # continue a run
+uv run --extra mjx --extra sb3 python -m lab.rl.test_policy eval [<id prefix>]       # latest checkpoint -> its eval/
+uv run --extra mjx ctk play runs/rl/test_tilt_hold-90.npz               # replay a test (relaunches under mjpython)
 uv run --extra mjx ctk play runs/test_policy/latest/checkpoints/current/eval/rollout.npz   # replay the latest policy eval
 ```
 
-Outputs: `runs/rl_env/test_<name>[_<params>].npz` (e.g. `test_tilt_hold-90.npz`,
+Outputs: `runs/rl/test_<name>[_<params>].npz` (e.g. `test_tilt_hold-90.npz`,
 `test_foot.npz`) + the `.xml` model that run used; `test_policy` uses runkit run dirs.
 `adhesion=<0..1>` sets the adhesion ctrl (default 0 for standup, 1 for hold/sweep).
 
@@ -35,20 +34,20 @@ turn off.
 Gravity is tilted, not the floor, so the floor always looks horizontal: read
 "wall" / "ceiling" off the arrow.
 
-Also written on every build: `lab/rl_env/models/scene_flat.xml` (inspection copy).
+Also written on every build: `lab/rl/models/scene_flat.xml` (inspection copy).
 
 ## Where things live
 
 - `docs/` — these notes, `foot_design.md`.
-- `config.py` — the shared configs: `ModelCfg` (robot model, keyframes), `ScriptedCfg`
+- `config.py` — the shared configs: `MjModelCfg` (robot model, keyframes), `ScriptedCfg`
   (stand-up / hold timing), `WalkEnvCfg` (task, reward, curriculum). A config lives with
   its only reader; shared ones here. Each experiment's own config sits next to its run
   function and nests these: `TiltCfg` (test_tilt), `FootTestCfg` (test_foot),
-  `PolicyCfg` (test_policy). Nested fields via dotted keys: `model.kp=12`, `env.w_air=15`.
+  `PolicyCfg` (test_policy). Nested fields via dotted keys: `mjmodel.kp=12`, `env.w_air=15`.
   Nothing hardcoded elsewhere.
-- `model.py` — `to_mjcf` -> `MjSpec`, then edits: masses, ankle + pad + adhesion per
+- `mjmodel.py` — `to_mjcf` -> `MjSpec`, then edits: masses, ankle + pad + adhesion per
   foot, scene (floor, gravity tilt as a `build()` argument). Its docstring maps each
-  `ModelCfg` field to where it lands in the model.
+  `MjModelCfg` field to where it lands in the model.
 - `poses.py` — `rest` / `stand` keyframes via `Leg3DOF` IK; same footholds, only body
   height differs; ankles solved so pads lie flat.
 - `scripted.py` — `standup` (rest -> stand -> rest via IK along body height) and `hold`
@@ -61,7 +60,7 @@ Also written on every build: `lab/rl_env/models/scene_flat.xml` (inspection copy
   arrays (raw values, no weights / dt; per-foot terms vectorized over (4,)); numpy
   only, so a JAX port is mostly `np` -> `jnp`.
 - `test_policy.py` — PPO (stable-baselines3, CPU) on `WalkEnv`, walking forward on the
-  floor at `cmd_vx`. A runkit `Experiment` with run / eval / viz roles (`PolicyCfg` =
+  floor at `cmd_vx`. A runkit `Experiment` with run / eval roles (`PolicyCfg` =
   `model` + `env` + steps, n_envs, `seed`; `config.yaml` is nested). Uses runkit's
   run-time API: `seed = random_seed()` (fresh per run, recorded; `seed=<n>` repeats a
   run exactly -- checked), `ctx.checkpoint("current")` every 20 PPO iterations + at the end,
@@ -76,12 +75,12 @@ Also written on every build: `lab/rl_env/models/scene_flat.xml` (inspection copy
   `eval.yaml`, `eval.jsonl`, `rollout.npz`, `gait.txt` -- emptied when the checkpoint is
   saved again. `--branch` continues a run from a checkpoint (weights, optimizer,
   normalization, step count; the schedule goes on). Older runs: model.zip at the
-  checkpoint's top, the eval in `out/eval/`. `bench` stays outside runkit.
+  checkpoint's top, the eval in `out/eval/`.
 - `test_foot.py` — foot pull test: one scene, a row of fixtures (locked / free / rigid
   carriage + tibia + real foot), force ramp until release. Own runner; its docstring
   describes every section.
 
-Parameter pointers (`ModelCfg` unless noted; see `model.py` docstring for the full list):
+Parameter pointers (`MjModelCfg` unless noted; see `mjmodel.py` docstring for the full list):
 - ankle stop: `ankle_range_deg` (now 45; was 25, rest pose needed 32)
 - ankle spring/damper: `ankle_stiffness`, `ankle_damping`
 - pad: `pad_size`, `pad_cells` (N x N), `pad_thickness`, `pivot_height`, `pad_friction`
@@ -165,7 +164,7 @@ Rotate gravity instead of the ground; real wall geometry only for transitions.
     Happens without adhesion too.
   - `gap` has no effect in 3.9.0 (includemargin stays = margin, not margin - gap), and
     margins of both geoms add (floor 2 mm + pad 2 mm -> 4 mm). Cause unconfirmed.
-    Accepted for now: small hover is fine. (The margin==gap comment in `model.py` is
+    Accepted for now: small hover is fine. (The margin==gap comment in `mjmodel.py` is
     what we intended, not what happens.)
   - Beyond the margin there is no adhesion at all: an on/off band, no falloff.
 
@@ -217,7 +216,7 @@ Rotate gravity instead of the ground; real wall geometry only for transitions.
     (doc's 1.0 / 0.1 are negligible in metres^2); `w_term` 20 instead of 1 (else
     ending the episode is cheaper than early exploration costs); init policy std
     exp(-1) = 0.37.
-  - First run `runs/rl_env/test_policy/20260923-235716` (stopped at 5.4M): vx 0.147
+  - First run `runs/rl/test_policy/20260923-235716` (stopped at 5.4M): vx 0.147
     of 0.15, no terminations, return ~35.
   - Contact history + gait terms (2026-09-24): the env keeps the last `contact_history`
     (100 = 2 s) policy steps of per-foot pad normal force, and air/planted timers
@@ -287,7 +286,7 @@ Rotate gravity instead of the ground; real wall geometry only for transitions.
     `adhesion` actuator and our per-cell contacts. Easier port: keep reward terms as
     pure functions of arrays.
 
-- Config restructure (2026-09-25): flat `Cfg` split into `ModelCfg` / `ScriptedCfg` /
+- Config restructure (2026-09-25): flat `Cfg` split into `MjModelCfg` / `ScriptedCfg` /
   `WalkEnvCfg` (config.py) + one config per experiment next to its run function
   (`TiltCfg`, `FootTestCfg`, `PolicyCfg`), nesting the shared ones. `tilt_deg` moved out
   of the model (only test_tilt tilts): `build(cfg, tilt_deg=...)`. Verified: seeded

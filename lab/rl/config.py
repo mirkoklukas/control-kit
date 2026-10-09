@@ -1,10 +1,10 @@
-"""Shared configs for the rl_env experiments: the spider model, and the parts several
+"""Shared configs for the rl experiments: the spider model, and the parts several
 modules read.
 
 A config lives with its only reader; configs read by several modules live here:
 
-- :class:`ModelCfg` -- the robot model (geometry, masses, foot, adhesion, servos, sim,
-  keyframes). Read by ``model.py``, ``poses.py``, ``scripted.py``, ``env.py`` and the
+- :class:`MjModelCfg` -- the robot model (geometry, masses, foot, adhesion, servos, sim,
+  keyframes). Read by ``mjmodel.py``, ``poses.py``, ``scripted.py``, ``env.py`` and the
   tests.
 - :class:`ScriptedCfg` -- timing of the scripted stand-up / hold motions
   (``scripted.py``, used by ``test_tilt``).
@@ -13,7 +13,7 @@ A config lives with its only reader; configs read by several modules live here:
 
 Each experiment's own config sits next to its run function and composes these
 (``TiltCfg`` in ``test_tilt.py``, ``FootTestCfg`` in ``test_foot.py``, ``PolicyCfg`` in
-``test_policy.py``). Nested fields are set with dotted keys: ``model.kp=12``.
+``test_policy.py``). Nested fields are set with dotted keys: ``mjmodel.kp=12``.
 
 All dimensions are placeholders to be tuned after looking at the model.
 """
@@ -22,8 +22,8 @@ from dataclasses import dataclass
 
 
 @dataclass
-class ModelCfg:
-    """The robot model: everything :func:`.model.build` and :mod:`.poses` need."""
+class MjModelCfg:
+    """The robot model: everything :func:`.mjmodel.build` and :mod:`.poses` need."""
     # --- robot geometry (spider: 4 radial legs, hip-yaw / hip-pitch / knee-pitch) ---
     num_legs: int = 4
     mount_radius: float = 0.10                    # body centre -> hip-yaw axis (m)
@@ -90,6 +90,8 @@ class WalkEnvCfg:
     episode_s: float = 10.0         # episode length (s)
     action_scale: float = 0.3       # action in [-1, 1] -> joint target offset from `stand` (rad)
     reset_noise: float = 0.05       # uniform joint-angle noise at reset (rad)
+    obs: str = "v1"                 # observation layout: "v1" (101, after Hwangbo et al. 2019)
+                                    # or "v2" (76); see env.py. Fixed at construction
 
     # --- reward weights (docs/policy-and-reward-terms.md); every term is multiplied by
     # the policy dt. Values at full strength; a training schedule (``_schedule`` in the
@@ -101,7 +103,9 @@ class WalkEnvCfg:
                                     # cmd 0.1 m/s earns 42% of the max at 20, 7% at 40
     w_yaw: float = 3.0              # R_yaw  yaw-rate tracking (reward); paper's 6 / 4 = 1.5,
                                     # doubled (2026-09-27) to hold the heading better
-    yaw_sharpness: float = 1.0      # R_yaw = K(yaw_sharpness * err), err in rad/s
+    yaw_sharpness: float = 10.0     # R_yaw = K(yaw_sharpness * err), err in rad/s. At 1 the
+                                    # kernel was flat (0.3 rad/s kept 98%), at 10 it keeps
+                                    # ~79% at 0.1 rad/s, ~17% at 0.3 rad/s
     w_torque: float = 0.005         # C_tau  ||tau||^2
     w_action_rate: float = 0.5      # C_smooth, on actions: ||a_t - a_t-1||^2
     w_joint_speed: float = 0.03     # C_phidot ||qdot||^2
@@ -118,8 +122,6 @@ class WalkEnvCfg:
                                     # times dt like all terms
     w_support: float = 5.0          # C_support: per foot short of min_support planted feet
                                     # (graded); doc: 20, on the wall
-    w_stall: float = 0.0            # C_stall ramp(t_behind): t_behind = distance behind the
-                                    # minimum pace stall_frac |cmd_xy|, in seconds at that pace
     w_term: float = 50.0            # termination cost (trunk contact / tipped over). The
                                     # paper's 1 would make sitting down (ending the episode)
                                     # cheaper than an episode of early exploration costs
@@ -132,9 +134,6 @@ class WalkEnvCfg:
     air_target: float = 0.25        # t_hat: desired air time per step (s)
     air_max: float = 0.5            # air time counted at most this (no lingering legs)
     min_support: int = 3            # crawl: at most one foot in the air
-    stall_frac: float = 0.5         # minimum pace, as a fraction of |cmd_xy|
-    stall_grace: float = 0.5        # time behind the pace without cost (s)
-    stall_ramp: float = 1.0         # then the cost rises to w_stall over this (s)
 
     # --- contact history ---
     contact_force_min: float = 1.0  # a foot is planted (loaded) above this normal force (N)
@@ -154,9 +153,9 @@ def parse_overrides(cls, argv: list[str], extra: dict) -> tuple[object, dict]:
     """``key=val`` args -> (config of class ``cls``, extras).
 
     For the tests that are not runkit experiments (``test_tilt``, ``test_foot``). Keys
-    are fields of ``cls`` -- dotted for nested configs (``model.kp=12``) -- or keys of
+    are fields of ``cls`` -- dotted for nested configs (``mjmodel.kp=12``) -- or keys of
     ``extra``. Built with runkit's parser, so the rules match runkit experiments; tuple
-    values are written as python literals (``model.forcerange=(-3,3)``).
+    values are written as python literals (``mjmodel.forcerange=(-3,3)``).
 
     Args:
         cls: the config dataclass to build.
