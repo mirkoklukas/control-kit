@@ -259,6 +259,76 @@ pushes) is $\ge r^*$ and can miss a weak diagonal direction.
   limit, normalized. A failing limit with $h_i = 0$ is not captured; check it separately.
 - **Depends on $H$**: another response gives other $h_i$ and another $r^*$.
 
+## 2c. Minimum-norm variant: no servos, no MuJoCo (2026-10-09)
+
+The same ball radius, built only from the **base rows** (equilibrium of the whole robot)
+and the **foot rows** (adhesion, friction). No servo rows, so no $J_a$, $b_a$: nothing that
+needs the MuJoCo statics.
+
+**Notation.** $c$: centre of mass (world); $M$: total mass; $x_j$: planted foot points
+(the ankle pivots, world); $g$: gravity.
+
+**Geometry instead of MuJoCo.** The robot as a point mass at $c$ (`point_mass_statics`):
+foot $j$'s block of $G$ is $\begin{bmatrix} I \\ [x_j - c]_\times \end{bmatrix}$ (force and
+moment about $c$), $b_b = (-M g, 0)$. $c$ from the kinematics (`kinematic_com`): the body's
+mass at the body origin, each link's along its link, the pad's at the pivot (`MassModel`,
+read once from the MuJoCo model by `ClimbModel.mass_model`). Checked against MuJoCo's centre
+of mass on 200 random postures: within 0.6 mm (median 0.4 mm; the pad's mass placed at the
+pivot).
+
+**Forces: minimum norm**, the smallest sum of squared foot forces in equilibrium:
+
+$$
+\begin{aligned}
+F &= G^\top (G G^\top)^{-1} b_b \\
+H &= G^\top (G G^\top)^{-1} S, \qquad F(w) = F + H w
+\end{aligned}
+$$
+
+($G G^\top$ is 6 x 6, invertible unless the feet are on a line; a tiny Tikhonov term keeps
+it so.) This is **not** the least-torque split of section 2b, which needs the servo rows: it
+is another choice of the internal forces.
+
+**Limits: the foot rows only** (adhesion, friction pyramid). No torque limits: a stance the
+servos cannot hold (a far-out foot on a wall) can score well here.
+
+**What it means.**
+
+- `holds` (all slacks >= 0): the minimum-norm forces satisfy adhesion and friction, a
+  **sufficient** equilibrium check. Other internal forces might hold where these do not
+  (exact: an LP over all $F$, `hold_lp` without torques, much slower).
+- $r$: the ball radius against adhesion and friction, for these forces.
+
+**Code.** `statics.min_norm_slacks`, `statics.push_score_min_norm`,
+`statics.kinematic_com`, `statics.MassModel`, `ClimbModel.mass_model`.
+
+**Benchmark** (`experiments/bench.py`, floor, laptop CPU; run
+`experiments/runs/planner_bench/2026-10-09_18-28-57_f6a6ebe0`). Per candidate, from the
+posture (everything included), batch 4096-16384:
+
+| | B_lift (tripod) | B_plant (tripod) | f' (four feet) |
+|---|---|---|---|
+| push score (MuJoCo statics, least torque) | 4.7-5.1 us | 4.7-5.2 us | 5.1-5.7 us |
+| push min-norm | 1.8-2.0 us | 1.9-2.0 us | 1.8-1.9 us |
+
+~2.5x faster, not the ~10x estimated: the kinematic centre of mass and feet (forward
+kinematics per leg) and the row Jacobian remain. Agreement on 1024 unique valid candidates
+per phase, push at 0.3 x weight:
+
+| | B_lift | B_plant | f' |
+|---|---|---|---|
+| pass: push score / min-norm | 0.97 / 1.00 | 0.99 / 1.00 | 1.00 / 1.00 |
+| min-norm passes, push score fails | 33 | 6 | 0 |
+| push score passes, min-norm fails | 0 | 0 | 0 |
+| rank correlation of the scores | 0.92 | 0.81 | **-0.22** |
+| median score: push score / min-norm (N) | 24.5 / 30.6 | 27.5 / 32.0 | 25.0 / 45.1 |
+
+- Min-norm is more optimistic (no torque limits): it never fails where the push score
+  passes; where it passes and the push score fails, likely the torques.
+- Tripods: the rankings agree well (0.81-0.92). Four feet: they do not (-0.22): with 6
+  internal-force directions the two splits differ a lot, and the torque limits shape the
+  full score. As a ranking for four-foot stances, min-norm is no substitute.
+
 ## Cost: the statics are the bottleneck (2026-10-09)
 
 Per posture, laptop CPU, batch ~16k-25k (`experiments/bench.py`;

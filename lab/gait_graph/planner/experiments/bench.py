@@ -21,13 +21,17 @@ candidate), then:
    - ``push fast``: :func:`..statics.push_check_fast` at the same push (no LP);
    - ``push score``: :func:`..statics.push_score`, the ball radius (``docs/push-score.md``);
      the share with ``r* >= `` the push.
+   - ``push min-norm``: :func:`..statics.push_score_min_norm`, the same without MuJoCo
+     statics: kinematic centre of mass, minimum-norm foot forces, adhesion and friction only;
+     the share with ``r >= `` the push.
 
 3. **Push fast vs. the LP check**: on the unique valid candidates (up to
    ``dist_max_batch``): the pass rates, and how often the fast check fails where the LP
    passes (needs tuned internal forces) or passes where the LP fails (should not happen:
    the fast check is sufficient).
 
-   And the push score against both: ``r* >= push`` must imply that push fast passes (its 12
+   And the minimum-norm score against the push score: holds / passes agreement and the rank
+   correlation of the scores. And the push score against both: ``r* >= push`` must imply that push fast passes (its 12
    directions lie in the ball), and ``r*`` must not exceed the min over the 12 directions
    of :func:`..statics.push_lambda`.
 
@@ -59,8 +63,9 @@ from ..climb_statics import ClimbModel
 from ..samplers import Samplers, region
 from ..scoring import G, make_torque_scorer
 from ..stance import Kit
-from ..statics import (disturbance_check, disturbance_directions, push_check_fast,
-                       push_lambda, push_score, push_slacks)
+from ..statics import (disturbance_check, disturbance_directions, kinematic_com,
+                       push_check_fast, push_lambda, push_score, push_score_min_norm,
+                       push_slacks)
 from ..step import Planner, StepCfg
 from .scores import ScoresCfg, scenario
 from .walk import WalkCfg, _sampled_start, _stand_start
@@ -105,6 +110,7 @@ def timed(f, *args, repeats=3):
 def score_fns(cm: ClimbModel, fh, planted_idx, cfg: BenchCfg) -> dict:
     """The scores, each jitted and vmapped over (postures, stances)."""
     idx = np.asarray(planted_idx)
+    robot, mm = make_robot(cm.mj), cm.mass_model()
     tau_max = float(cm.mj.forcerange[1])
     lam = cfg.dist_min * cm.mass * 9.81
 
@@ -128,6 +134,13 @@ def score_fns(cm: ClimbModel, fh, planted_idx, cfg: BenchCfg) -> dict:
         a, n = st(p, s)
         return push_score(a, planted_idx, n, cfg.adhesion, cfg.mu, tau_max)[0]
 
+    def score_mn(p, s):
+        sh = robot.shoulders(p.body)
+        feet = jax.vmap(lambda i: sh[i].apply(robot.leg.forward(p.thetas[i]).translation()[-1]))(
+            jnp.asarray(idx))                                          # planted pivots, world
+        return push_score_min_norm(kinematic_com(robot, p, mm), feet, fh.normal[s][idx],
+                                   cm.mass, G, cfg.adhesion, cfg.mu)
+
     def lam12(p, s):
         a, n = st(p, s)
         sl, h = push_slacks(a, planted_idx, n, cfg.adhesion, cfg.mu, tau_max)
@@ -142,6 +155,8 @@ def score_fns(cm: ClimbModel, fh, planted_idx, cfg: BenchCfg) -> dict:
         "dist check": jax.jit(jax.vmap(dist)),
         "push fast": jax.jit(jax.vmap(push)),
         "push score": jax.jit(jax.vmap(score)),
+        "push min-norm": jax.jit(jax.vmap(lambda p, s: score_mn(p, s)[0])),
+        "_mn_full": jax.jit(jax.vmap(score_mn)),                # not timed: the comparison
         "_lam12": jax.jit(jax.vmap(lam12)),             # not timed: the sanity check
     }
 
@@ -234,7 +249,7 @@ def run(cfg: BenchCfg, ctx: RunContext) -> dict:
           f"push fast: share passing); "
           f"dist check at {cfg.dist_min} x weight, batches <= {cfg.dist_max_batch}")
     print(f"  {'phase':>7} | {'k':>5} | " + " | ".join(f"{nm:>18}" for nm in names))
-    agree = {}
+    agree, mn = {}, {}
     scoring = []
     for name, (_, which) in phases.items():
         out = pools[name]
@@ -258,9 +273,9 @@ def run(cfg: BenchCfg, ctx: RunContext) -> dict:
                 elif nm == "push fast":
                     row["push_pass"] = float(np.mean(np.asarray(res)))
                     cells.append(f"{row[nm]:8.4f} ({row['push_pass']:4.2f})")
-                elif nm == "push score":
-                    row["score_pass"] = float(np.mean(np.asarray(res) >= lam))
-                    cells.append(f"{row[nm]:8.4f} ({row['score_pass']:4.2f})")
+                elif nm in ("push score", "push min-norm"):
+                    row[nm + " pass"] = float(np.mean(np.asarray(res) >= lam))
+                    cells.append(f"{row[nm]:8.4f} ({row[nm + ' pass']:4.2f})")
                 else:
                     cells.append(f"{row[nm]:18.4f}")
             scoring.append(row)
@@ -274,6 +289,14 @@ def run(cfg: BenchCfg, ctx: RunContext) -> dict:
         fast = np.asarray(fns[which]["push fast"](P, S))
         r = np.asarray(fns[which]["push score"](P, S))
         l12 = np.asarray(fns[which]["_lam12"](P, S))
+        r_mn, _, holds_mn = (np.asarray(a) for a in fns[which]["_mn_full"](P, S))
+        rank = lambda a: np.argsort(np.argsort(a))
+        mn[name] = dict(n=len(u), holds_full=float((r >= 0).mean()), holds_mn=float(holds_mn.mean()),
+                        pass_full=float((r >= lam).mean()), pass_mn=float((r_mn >= lam).mean()),
+                        mn_pass_full_fail=int(((r_mn >= lam) & (r < lam)).sum()),
+                        full_pass_mn_fail=int(((r >= lam) & (r_mn < lam)).sum()),
+                        spearman=float(np.corrcoef(rank(r), rank(r_mn))[0, 1]),
+                        r_median=float(np.median(r)), r_mn_median=float(np.median(r_mn)))
         agree[name] = dict(n=len(u), lp_pass=float(lp.mean()), fast_pass=float(fast.mean()),
                            fast_fail_lp_pass=int((~fast & lp).sum()),
                            fast_pass_lp_fail=int((fast & ~lp).sum()),
@@ -293,7 +316,13 @@ def run(cfg: BenchCfg, ctx: RunContext) -> dict:
     for name, a in agree.items():
         print(f"  {name:>7} | {a['n']:>5} | {a['score_pass']:10.2f} | {a['score_pass_fast_fail']:>21} "
               f"| {a['score_above_lam12']:>14} | {a['r_median']:9.2f} | {a['lam12_median']:12.2f}")
-    return {"sampling": sampling, "scoring": scoring, "agreement": agree}
+    print(f"\n  push min-norm vs. push score (both at {cfg.dist_min} x weight), unique valid candidates")
+    print(f"  {'phase':>7} | {'n':>5} | {'pass full':>9} | {'pass min-norm':>13} | {'mn pass, full fail':>18} "
+          f"| {'full pass, mn fail':>18} | {'rank corr':>9} | {'median r full / mn':>18}")
+    for name, a in mn.items():
+        print(f"  {name:>7} | {a['n']:>5} | {a['pass_full']:9.2f} | {a['pass_mn']:13.2f} | {a['mn_pass_full_fail']:>18} "
+              f"| {a['full_pass_mn_fail']:>18} | {a['spearman']:9.2f} | {a['r_median']:8.1f} / {a['r_mn_median']:7.1f}")
+    return {"sampling": sampling, "scoring": scoring, "agreement": agree, "min_norm": mn}
 
 
 if __name__ == "__main__":

@@ -822,6 +822,12 @@ def push_score(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
         (including the rows the push does not affect).
     """
     s, h = push_slacks(st, planted_idx, normals, adhesion, mu, tau_max, length, faces)
+    return _ball_radius(s, h, beta, h_tol)
+
+
+def _ball_radius(s, h, beta=None, h_tol=1e-9):
+    """``(r, i_star, holds)`` from slacks s (m,) and sensitivities h (m, 6): see
+    :func:`push_score`."""
     hn = jnp.linalg.norm(h, axis=-1)
     affected = hn > h_tol
     ratio = jnp.where(affected, s / jnp.where(affected, hn, 1.0), jnp.inf)
@@ -831,6 +837,183 @@ def push_score(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
     else:
         r = -jax.nn.logsumexp(-beta * jnp.where(affected, ratio, 1e6)) / beta
     return r, i_star, jnp.all(s >= 0.0)
+
+
+# --------------------------------------------------------------------------- #
+# Push score without the servos: minimum-norm forces (docs/push-score.md)      #
+# --------------------------------------------------------------------------- #
+@dataclass
+class MassModel:
+    """Where a robot's mass sits, for its centre of mass from the kinematics alone.
+
+    Args:
+        body: mass of the body (kg), at the body frame's origin.
+        links: (n_joints,) mass of each leg link (kg), per leg.
+        link_com: (n_joints,) each link's centre of mass along its frame's x-axis (m),
+            from its joint.
+        foot: mass at the foot point (kg), per leg (the pad, approximated at the pivot).
+    """
+    body: float
+    links: jax.Array
+    link_com: jax.Array
+    foot: float
+
+
+def total_mass(mm: MassModel, num_legs: int) -> jax.Array:
+    """The robot's total mass (kg)."""
+    return mm.body + num_legs * (jnp.sum(mm.links) + mm.foot)
+
+
+def kinematic_com(robot, posture, mm: MassModel) -> jax.Array:
+    """The robot's centre of mass from its kinematics (no MuJoCo), world frame (m).
+
+    The body's mass at the body origin, each link's along its frame's x-axis, the foot's at
+    the foot point.
+
+    Args:
+        robot: a :class:`controlkit.kinematics.Robot` (mounts, leg).
+        posture: body pose and (L, n_joints) angles.
+        mm: the mass model.
+
+    Returns:
+        (3,) centre of mass.
+    """
+    sh = robot.shoulders(posture.body)
+    L = posture.thetas.shape[0]
+
+    def leg(i):
+        fr = robot.leg.forward(posture.thetas[i])                       # (n+1,) base frame
+        n = mm.links.shape[0]
+        link = jax.vmap(lambda k: fr[k].apply(jnp.array([1.0, 0.0, 0.0]) * mm.link_com[k]))(
+            jnp.arange(n))                                              # (n, 3)
+        pts = jnp.concatenate([link, fr.translation()[-1:]], 0)        # links, foot
+        w = jnp.concatenate([mm.links, jnp.array([mm.foot])])
+        return jax.vmap(sh[i].apply)(pts), w
+
+    pts, w = jax.vmap(leg)(jnp.arange(L))                               # (L, n+1, 3), (L, n+1)
+    num = mm.body * posture.body.translation() + jnp.einsum("lk,lkc->c", w, pts)
+    return num / (mm.body + jnp.sum(w))
+
+
+def min_norm_forces(com, feet, mass, g, length=DIST_LENGTH, eps=1e-10):
+    """Minimum-norm foot forces in equilibrium, and their response to a body push.
+
+    The robot as a point mass at ``com`` (:func:`point_mass_statics`): ``G F = b_b``, ``G``
+    (6, 3p) the planted feet's forces to the net force and moment about ``com``. Of all
+    forces in equilibrium, the one with the smallest sum of squared foot forces ``|F|^2``
+    (**not** the least servo torque, which needs the servo rows); likewise for a push w (6,):
+
+        F = G^T (G G^T)^-1 b_b,    H = G^T (G G^T)^-1 S,    F(w) = F + H w
+
+    (``S = diag(I, length I)``: w's moment part is moment / length, in N).
+
+    Args:
+        com: (3,) centre of mass, world frame (m) (e.g. :func:`kinematic_com`).
+        feet: (p, 3) planted foot points (where the force acts: the ankle pivots), world.
+        mass: total mass (kg).
+        g: (3,) gravity, world frame (m/s^2).
+        length: lever length L (m) of the push's moment part.
+        eps: Tikhonov term on ``G G^T`` (feet on a line make it singular).
+
+    Returns:
+        A tuple ``(F, H)``: (p, 3) forces the surface exerts on the feet (N), (3p, 6) push
+        response.
+    """
+    st = point_mass_statics(com, feet, mass, g)
+    G = jnp.transpose(st.J_base, (1, 0, 2)).reshape(6, -1)             # (6, 3p)
+    S = jnp.diag(jnp.array([1.0, 1.0, 1.0, length, length, length]))
+    X = jnp.linalg.solve(G @ G.T + eps * jnp.eye(6),
+                         jnp.concatenate([st.bias_base[:, None], S], 1))   # (6, 7)
+    FH = G.T @ X                                                        # (3p, 7)
+    return FH[:, 0].reshape(-1, 3), FH[:, 1:]
+
+
+def hold_min_norm(com, feet, normals, mass, g, adhesion, mu, faces=PYRAMID_FACES):
+    """Does the stance hold under gravity with the minimum-norm foot forces, within adhesion
+    and friction (:func:`min_norm_forces`)? No pushes, no servos, no torque limits.
+
+    A **sufficient** equilibrium check: if it holds, some forces hold the stance; if not,
+    other internal forces might still (exact: an LP over all F, :func:`hold_lp` without
+    torques). One 6 x 6 solve and the foot rows.
+
+    Args:
+        com, feet, mass, g: see :func:`min_norm_forces`.
+        normals: (p, 3) unit surface normals at the planted feet.
+        adhesion, mu, faces: see :func:`hold_lp`.
+
+    Returns:
+        A tuple ``(holds, F, margin)``: scalar bool; (p, 3) the forces (N); the smallest
+        slack over the foot rows (N; < 0: some row fails).
+    """
+    F, _ = min_norm_forces(com, feet, mass, g)
+    s = -limit_rows(F, jnp.zeros(0), normals, adhesion, mu, 0.0, faces)
+    return jnp.all(s >= 0.0), F, s.min()
+
+
+def min_norm_slacks(com, feet, normals, mass, g, adhesion, mu, length=DIST_LENGTH,
+                    faces=PYRAMID_FACES, eps=1e-10):
+    """Foot-row slacks and their sensitivity to a body push, with minimum-norm forces.
+
+    Only the base rows of the statics, for the robot as a point mass at ``com``
+    (:func:`point_mass_statics`): ``G F = b_b``, with ``G`` (6, 3p) the planted feet's
+    forces to the net force and moment about ``com``. The forces are the **minimum-norm**
+    solution, the smallest sum of squared foot forces ``|F|^2`` in equilibrium (not the
+    least servo torque, which would need the servo rows), and so is their response to a
+    push w (6,):
+
+        F = G^T (G G^T)^-1 b_b,    H = G^T (G G^T)^-1 S,    F(w) = F + H w
+
+    (``S = diag(I, length I)``: w's moment part is moment / length, in N). The limits are
+    the foot rows only, adhesion and the friction pyramid (:func:`limit_rows` without
+    torques); no servo torques, no torque limits.
+
+    Args:
+        com: (3,) centre of mass, world frame (m) (e.g. :func:`kinematic_com`).
+        feet: (p, 3) planted foot points (where the force acts: the ankle pivots), world.
+        normals: (p, 3) unit surface normals at the planted feet.
+        mass: total mass (kg).
+        g: (3,) gravity, world frame (m/s^2).
+        adhesion, mu, faces: see :func:`hold_lp`.
+        length: lever length L (m) of the push's moment part.
+        eps: Tikhonov term on ``G G^T`` (feet on a line make it singular).
+
+    Returns:
+        A tuple ``(s, h)``: (p (faces + 1),) slacks at rest (N), (p (faces + 1), 6)
+        sensitivities.
+    """
+    F, H = min_norm_forces(com, feet, mass, g, length, eps)
+    F = F.reshape(-1)
+
+    def rows(w):
+        return limit_rows((F + H @ w).reshape(-1, 3), jnp.zeros(0), normals, adhesion, mu,
+                          0.0, faces)
+
+    w0 = jnp.zeros(6)
+    return -rows(w0), jax.jacfwd(rows)(w0)
+
+
+def push_score_min_norm(com, feet, normals, mass, g, adhesion, mu, length=DIST_LENGTH,
+                        faces=PYRAMID_FACES, beta=None, h_tol=1e-9):
+    """The push score (the ball radius, :func:`push_score`) without the servos: minimum-norm
+    foot forces, adhesion and friction only (:func:`min_norm_slacks`).
+
+    Needs no MuJoCo statics, only the planted feet and the centre of mass, so it is cheap.
+    It differs from :func:`push_score` in two ways: the force split (minimum ``|F|^2``,
+    not least servo torque; another split of the internal forces) and no torque limits
+    (a stance the servos cannot hold can score well here). ``holds``: the minimum-norm
+    forces satisfy adhesion and friction, a **sufficient** equilibrium check (other
+    internal forces might hold where these do not).
+
+    Args:
+        com, feet, normals, mass, g, adhesion, mu, length, faces: see
+            :func:`min_norm_slacks`.
+        beta, h_tol: see :func:`push_score`.
+
+    Returns:
+        A tuple ``(r, i_star, holds)`` as :func:`push_score` (rows: foot rows only).
+    """
+    s, h = min_norm_slacks(com, feet, normals, mass, g, adhesion, mu, length, faces)
+    return _ball_radius(s, h, beta, h_tol)
 
 
 def push_lambda(s, h, directions):

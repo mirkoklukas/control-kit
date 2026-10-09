@@ -28,7 +28,7 @@ from controlkit.kinematics.types import Posture
 
 from .climb_model.config import MjModelCfg
 from .climb_model.mjmodel import build
-from .statics import Statics, statics
+from .statics import MassModel, Statics, statics
 
 
 class ClimbModel:
@@ -92,6 +92,19 @@ class ClimbModel:
         b = jnp.arcsin(jnp.clip(dvec[:, 1], -1.0, 1.0))
         ank = jnp.clip(jnp.stack([a, b], -1), -self.ankle_range, self.ankle_range)
         return q.at[self.ank_qadr.reshape(-1)].set(ank.reshape(-1))
+
+    def mass_model(self) -> MassModel:
+        """The model's masses for :func:`.statics.kinematic_com` (read from leg 0; the legs
+        are identical): the base's, each link's with its centre of mass along the link,
+        and the foot's (ankle and pad bodies together, placed at the pivot)."""
+        m = self.model
+        links = [m.body(f"leg0_{k}") for k in range(3)]
+        foot_root = m.body("foot0").id
+        foot = float(m.body_subtreemass[foot_root])
+        return MassModel(body=float(m.body_mass[1]),
+                         links=jnp.array([float(m.body_mass[b.id]) for b in links]),
+                         link_com=jnp.array([float(m.body_ipos[b.id][0]) for b in links]),
+                         foot=foot)
 
     def statics(self, qpos, g) -> Statics:
         """:func:`.statics.statics` of ``qpos`` under ``g``, torques on the 12 servos."""
