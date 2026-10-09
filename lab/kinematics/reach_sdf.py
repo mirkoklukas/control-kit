@@ -8,6 +8,8 @@ gradients (and the chain rule through a body pose) come from autodiff.
 
     grid = make_reach_grid(leg, h=0.005, keepout=Keepout(body_pose, center, half))
     grid.ok[i, j, k, b], grid.thetas[i, j, k, b]     # branch b at vertex grid.points()[i, j, k]
+    grid.feet[i, j, k, b]                            # FK of that theta (~ the vertex)
+    inside, ok, thetas, feet = grid.device().lookup(x_shoulder)   # nearest vertex, in JAX
     sdf = grid.sdf()
     d = sdf.sdf(x)                                   # > 0: reachable, metres
     d, g = jax.value_and_grad(sdf.sdf)(x)
@@ -186,23 +188,29 @@ class ReachSDF:
         return cls(D=jnp.asarray(z["D"]), lower_left=jnp.asarray(z["lower_left"]), h=float(z["h"]))
 
 
+@jax.tree_util.register_dataclass
 @dataclass
 class ReachGrid:
-    """A leg's reach set on a box grid around the shoulder: every IK branch per vertex.
-    Shoulder frame; numpy arrays (host memory: 52 B per vertex with 4 branches).
+    """A leg's reach set on a box grid around the shoulder: every IK branch per vertex,
+    with the foot each branch's angles put. Shoulder frame. Host (numpy) arrays as built
+    (100 B per vertex with 4 branches); :meth:`device` for JAX (:meth:`lookup`).
 
     Args:
         ok: (nx, ny, nz, B) bool, branch b reaches vertex (i, j, k) and passes the filters.
         thetas: (nx, ny, nz, B, n_joints) float32, the branches' joint angles (meaningless
             where not ``ok``).
+        feet: (nx, ny, nz, B, 3) float32, forward kinematics of ``thetas``: the foot the
+            stored angles put (the vertex, up to float error, for an IK-built grid; not
+            for a grid built from forward kinematics).
         lower_left: (3,) position of vertex (0, 0, 0), the corner with the smallest x, y, z
             (m). Vertex (i, j, k) sits at ``lower_left + h (i, j, k)``.
         h: voxel size (m).
     """
     ok: np.ndarray
     thetas: np.ndarray
+    feet: np.ndarray
     lower_left: np.ndarray
-    h: float
+    h: float = field(metadata=dict(static=True))
 
     @property
     def shape(self) -> tuple:
@@ -213,6 +221,29 @@ class ReachGrid:
     def mask(self) -> np.ndarray:
         """(nx, ny, nz) bool: some branch reaches the vertex."""
         return self.ok.any(-1)
+
+    def device(self) -> "ReachGrid":
+        """The same grid with JAX arrays (for :meth:`lookup` inside jitted code)."""
+        return ReachGrid(ok=jnp.asarray(self.ok), thetas=jnp.asarray(self.thetas),
+                         feet=jnp.asarray(self.feet), lower_left=jnp.asarray(self.lower_left),
+                         h=self.h)
+
+    def lookup(self, x: jax.Array):
+        """The nearest vertex's branches for a foot position ``x`` (3,), shoulder frame.
+
+        ``round((x - lower_left) / h)``: a few flops and one gather. Use on a
+        :meth:`device` grid inside jitted code.
+
+        Returns:
+            A tuple ``(inside, ok, thetas, feet)``: scalar bool, x within half a cell of the
+            grid; (B,) bool, valid branches (all false outside the grid); (B, n_joints)
+            angles; (B, 3) their feet (shoulder frame, up to ``sqrt(3) h / 2`` from x).
+        """
+        dims = jnp.array(self.ok.shape[:3])
+        ijk = jnp.round((x - self.lower_left) / self.h).astype(jnp.int32)
+        inside = jnp.all((ijk >= 0) & (ijk < dims))
+        i, j, k = jnp.clip(ijk, 0, dims - 1)
+        return inside, self.ok[i, j, k] & inside, self.thetas[i, j, k], self.feet[i, j, k]
 
     def points(self) -> np.ndarray:
         """(nx, ny, nz, 3) vertex positions (m)."""
@@ -235,14 +266,15 @@ class ReachGrid:
 
     def save(self, path) -> None:
         """Write to an ``.npz``."""
-        np.savez_compressed(path, ok=self.ok, thetas=self.thetas, lower_left=self.lower_left,
-                            h=self.h)
+        np.savez_compressed(path, ok=self.ok, thetas=self.thetas, feet=self.feet,
+                            lower_left=self.lower_left, h=self.h)
 
     @classmethod
     def load(cls, path) -> "ReachGrid":
         """Read from an ``.npz`` written by :meth:`save`."""
         z = np.load(path)
-        return cls(ok=z["ok"], thetas=z["thetas"], lower_left=z["lower_left"], h=float(z["h"]))
+        return cls(ok=z["ok"], thetas=z["thetas"], feet=z["feet"], lower_left=z["lower_left"],
+                   h=float(z["h"]))
 
 
 def make_reach_grid(leg: Leg, h: float, *, use_limits: bool = True,
@@ -258,7 +290,7 @@ def make_reach_grid(leg: Leg, h: float, *, use_limits: bool = True,
     Args:
         leg, use_limits, keepout: see :func:`branches_fn`.
         h: voxel size (m); rounded so the cube's half-width is a multiple of it. Memory with
-            4 branches, uncropped: 5 mm ~220 MB, 2 mm ~3.4 GB.
+            4 branches (angles and feet), uncropped: 1 cm ~53 MB, 5 mm ~420 MB, 2 mm ~6.4 GB.
         half_width: the cube to search; None: the leg's full length (``leg.lengths.sum()``),
             the farthest it can reach.
         crop: cells kept around the bounding box of the reachable vertices; None: keep the
@@ -280,9 +312,15 @@ def make_reach_grid(leg: Leg, h: float, *, use_limits: bool = True,
         lo_i = np.maximum(idx.min(0) - crop, 0)
         hi_i = np.minimum(idx.max(0) + crop, n - 1)
         lower_left, shape = lower_left + h * lo_i, tuple(hi_i - lo_i + 1)
-    branches = jax.jit(jax.vmap(branches_fn(leg, use_limits=use_limits, keepout=keepout)))
-    ok, thetas = _over_box(branches, lower_left, h, shape, chunk)
-    return ReachGrid(ok=ok, thetas=thetas.astype(np.float32), lower_left=lower_left, h=h)
+    branches = branches_fn(leg, use_limits=use_limits, keepout=keepout)
+
+    def with_feet(x):
+        ok, thetas = branches(x)
+        return ok, thetas, jax.vmap(lambda t: leg.forward(t).translation()[-1])(thetas)
+
+    ok, thetas, feet = _over_box(jax.jit(jax.vmap(with_feet)), lower_left, h, shape, chunk)
+    return ReachGrid(ok=ok, thetas=thetas.astype(np.float32), feet=feet.astype(np.float32),
+                     lower_left=lower_left, h=h)
 
 
 def reach_mask(leg: Leg, h: float, *, use_limits: bool = True, keepout: Keepout | None = None,

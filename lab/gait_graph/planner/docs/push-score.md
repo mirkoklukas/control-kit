@@ -259,6 +259,32 @@ pushes) is $\ge r^*$ and can miss a weak diagonal direction.
   limit, normalized. A failing limit with $h_i = 0$ is not captured; check it separately.
 - **Depends on $H$**: another response gives other $h_i$ and another $r^*$.
 
+## Cost: the statics are the bottleneck (2026-10-09)
+
+Per posture, laptop CPU, batch ~16k-25k (`experiments/bench.py`;
+`lab/kinematics/posture-sampling.ipynb`):
+
+| step | per posture | 25,600 postures |
+|---|---|---|
+| sample body + single leg (reach grid) | ~0.55 us | ~14 ms |
+| sample body + full posture (reach grid) | ~1.3 us | ~33 ms |
+| push score incl. statics | ~4.7 us | ~120 ms |
+| of which statics (`mjx.forward` + foot Jacobians) | ~4.0 us | ~100 ms |
+| of which the score itself | ~0.7 us | ~20 ms |
+
+Scoring is ~4x the sampling, and the statics are ~85% of the scoring. Options, roughly from
+cheapest to try:
+
+1. **Filter before scoring**: cheap rejects first (collisions, foot spacing, centre of mass
+   over the support), statics only for the survivors.
+2. **Statics from our own kinematic model**: `controlkit`'s `Robot` is pure JAX with the
+   joint frames; foot Jacobians from the chain, gravity terms from the link masses and
+   centres of mass. Skips the parts of `mjx.forward` we do not use. Expected a few x
+   faster; not measured. Check agreement with the MuJoCo statics.
+3. **Point-mass statics** (`point_mass_statics`): very cheap, but no leg masses and no servo
+   torques (legs are ~36% of the mass).
+4. **GPU**: the pipeline is batched JAX; untested.
+
 ## Open
 
 - Compare $r^*$ with `disturbance_margin` on the stances of `experiments/scores.py`,
