@@ -353,7 +353,29 @@ cheapest to try:
    faster; not measured. Check agreement with the MuJoCo statics.
 3. **Point-mass statics** (`point_mass_statics`): very cheap, but no leg masses and no servo
    torques (legs are ~36% of the mass).
-4. **GPU**: the pipeline is batched JAX; untested.
+4. **GPU**: the pipeline is batched JAX. Measured below.
+
+**Laptop CPU vs. GPU** (2026-10-09, `experiments/score_bench.py`; laptop: Apple CPU, jax
+0.10.2; GPU: NVIDIA A10 24 GB, jax 0.10.2 + CUDA 12, mujoco 3.9.0). Per sample, after
+compilation; sampling with the 1 cm reach grid, scores on the sampled full postures:
+
+| stage | CPU, n = 16k | GPU, n = 16k | CPU, n = 262k | GPU, n = 262k | speedup at 262k |
+|---|---|---|---|---|---|
+| leg, fixed body | 0.100 us | 0.024 us | 0.034 us | 0.0020 us | 17x |
+| body + leg | 0.60 us | 0.039 us | 0.38 us | 0.021 us | 19x |
+| body + posture | 1.41 us | 0.096 us | 1.08 us | 0.068 us | 16x |
+| push score (MuJoCo statics) | 4.94 us | 0.56 us | 5.13 us | 0.54 us | 9.5x |
+| push min-norm | 1.82 us | 0.054 us | 2.03 us | 0.045 us | 45x |
+| hold min-norm | 1.55 us | 0.043 us | 1.78 us | 0.034 us | 53x |
+
+- At n = 1 the GPU is no faster (sub-ms per call either way; the scores are slower on the
+  GPU: kernel launches). At 1k it starts to pay off; at 16k it is close to its rate.
+- 262k full postures on the GPU: sampling ~18 ms, push score ~141 ms, push min-norm ~12 ms,
+  hold min-norm ~9 ms. The MuJoCo statics remain the bottleneck on the GPU too, and gain
+  least (~10x); the MuJoCo-free scores gain ~50x.
+- Compile times on the GPU are ~3x the CPU's (push score 11-16 s, samplers 1-4 s).
+- Runs: laptop `experiments/runs/score_bench/` (2026-10-09), GPU box
+  `~/control-kit/lab/gait_graph/planner/experiments/runs/score_bench/2026-10-09_17-28-03_aa3165f2`.
 
 ## Open
 
