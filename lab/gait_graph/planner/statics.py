@@ -895,6 +895,49 @@ def kinematic_com(robot, posture, mm: MassModel) -> jax.Array:
     return num / (mm.body + jnp.sum(w))
 
 
+def leg_torques(robot, mm: MassModel, g, body, thetas, forces):
+    """Servo torques from the kinematics alone (no MuJoCo): ``tau_j = b_a,j - J_j^T f_j`` per
+    leg, the torques that hold the legs' own weight and the foot forces.
+
+    ``J_j`` (3, n_joints): the Jacobian of leg j's foot point (world) w.r.t. its joint angles;
+    ``b_a,j``: the gravity torque of the leg's links, the gradient of their potential energy
+    ``-sum_k m_k g . c_k(theta)`` (link masses at ``mm.link_com`` along each link, the foot
+    mass at the foot point, as :func:`kinematic_com`). Same convention as :func:`statics`:
+    ``tau = bias_joint - J^T F``, F the force the surface exerts on the foot.
+
+    Args:
+        robot: the :class:`Robot`.
+        mm: the mass model.
+        g: (3,) gravity, world (m/s^2).
+        body: SE3 body pose.
+        thetas: (L, n_joints) joint angles.
+        forces: (L, 3) foot forces, world (zero for legs in the air).
+
+    Returns:
+        (L, n_joints) torques (N m).
+    """
+    sh = robot.shoulders(body)
+    n = mm.links.shape[0]
+    g = jnp.asarray(g, float)
+
+    def leg(j):
+        def foot(th):
+            return sh[j].apply(robot.leg.forward(th).translation()[-1])
+
+        def potential(th):
+            fr = robot.leg.forward(th)
+            link = jax.vmap(lambda k: fr[k].apply(jnp.array([1.0, 0.0, 0.0]) * mm.link_com[k]))(
+                jnp.arange(n))
+            pts = jax.vmap(sh[j].apply)(jnp.concatenate([link, fr.translation()[-1:]], 0))
+            w = jnp.concatenate([mm.links, jnp.array([mm.foot])])
+            return -jnp.sum(w * (pts @ g))
+
+        th = thetas[j]
+        return jax.grad(potential)(th) - jax.jacfwd(foot)(th).T @ forces[j]
+
+    return jax.vmap(leg)(jnp.arange(thetas.shape[0]))
+
+
 def min_norm_forces(com, feet, mass, g, length=DIST_LENGTH, eps=1e-10):
     """Minimum-norm foot forces in equilibrium, and their response to a body push.
 

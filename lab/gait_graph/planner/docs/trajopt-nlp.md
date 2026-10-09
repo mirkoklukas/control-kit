@@ -329,6 +329,40 @@ warm-started from `plan_transfer`):
   Fine for now; better later: only a progress condition (x of B_lift - x of B >= advance),
   the joint angles at B_lift initialized by IK.
 
+## TOWR-style transfer, v0 (2026-10-09)
+
+`towr_transfer.py`, `experiments/towr_transfer.py`. One transfer $(T, S, T')$ from a fixed
+body B: bodies B (fixed, on T), B_plant (on T, reaches S), B_lift (on T', reaches S), B'
+(on T', reaches T'). Closer to TOWR than the v0 refine above: **no joint angles**.
+
+- Variables (57): B_plant, B_lift, B' (position + roll / pitch / yaw), the new foothold f
+  (3D, on the floor by $f_z = 0$), the supporting feet's **forces** at all four bodies (3 x 3
+  each).
+- Reach: per body and foot, $\mathrm{sdf}(s_j(B)^{-1}(f_j + r\,n_j)) \ge$ margin (reach grid,
+  5 mm, margin 5 mm; `lab/kinematics/reach_sdf.py`).
+- Equilibrium: $G(c, \text{feet}) F = b_b$ per body, $c$ from `com_approx`: a leg's mass at
+  $\alpha$ shoulder + $(1 - \alpha)$ foot, $\alpha = 0.525$ fit against the kinematic centre of
+  mass (median error 6 mm over random postures). Legs in the air: leg i at B at its old
+  foothold, leg i' at B' tucked (a fixed point in its shoulder frame).
+- Limits: friction pyramid, no adhesion; each supporting foot's normal force $\ge$ 0.1 x its
+  share of the weight; f at least 8 cm from the other footholds; body box corners >= 2 cm
+  above the floor.
+- Objective: max $x(B') - x(B)$ + small regularizers.
+- Verification afterwards with joint angles: exact IK for every foot a body must reach, the
+  real centre of mass from those angles, an exact equilibrium LP with it.
+
+**First result** (floor, no adhesion, gravity only, transfer 1 -> 0, B 5 cm towards T's
+centroid): progress **17.9 cm**; SLSQP 1000 iterations in 4 s (iteration limit, but
+feasible: violations ~1e-6); every body verified (IK reaches all, holds with the true
+centre of mass; centre-of-mass error 2-13 mm). Without the normal-force margin the optimum
+put the whole weight of B' on one foot (a knife edge that failed with the true centre of
+mass); without the foot separation f went under the body.
+
+Open: roll / pitch sit at their bounds (+-20 deg; tilting extends the reach); B' still
+leans on one foot (normal forces 0.9 / 0.9 / 25.6 N, the margin at its bound); no pushes,
+no ankle cone, no leg collisions, no paths between the bodies; SLSQP does not report
+convergence.
+
 ## References
 
 Papers:

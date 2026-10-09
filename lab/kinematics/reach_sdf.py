@@ -9,6 +9,7 @@ gradients (and the chain rule through a body pose) come from autodiff.
     grid = make_reach_grid(leg, h=0.005, keepout=Keepout(body_pose, center, half))
     grid.ok[i, j, k, b], grid.thetas[i, j, k, b]     # branch b at vertex grid.points()[i, j, k]
     grid.feet[i, j, k, b]                            # FK of that theta (~ the vertex)
+    grid.contact[i, j, k, b]                         # its foot-to-knee direction (ankle cone)
     inside, ok, thetas, feet = grid.device().lookup(x_shoulder)   # nearest vertex, in JAX
     sdf = grid.sdf()
     d = sdf.sdf(x)                                   # > 0: reachable, metres
@@ -127,6 +128,20 @@ def _cr_weights(t):
     return 0.5 * jnp.stack([-t3 + 2 * t2 - t, 3 * t3 - 5 * t2 + 2, -3 * t3 + 4 * t2 + t, t3 - t2])
 
 
+def _catmull_rom(D, lower_left, h, x):
+    """Tricubic Catmull-Rom interpolation of grid samples ``D`` (nx, ny, nz, ...) at ``x``
+    (3,), clamped to where the 4x4x4 stencil fits. Returns ``(value, clamped x)``."""
+    upper = lower_left + h * (jnp.array(D.shape[:3]) - 1)
+    q = jnp.clip(x, lower_left + h, upper - 2 * h)
+    u = (q - lower_left) / h
+    i = jnp.floor(u).astype(jnp.int32)
+    t = u - i
+    ix = i[:, None] + jnp.arange(-1, 3)                                        # (3, 4)
+    patch = D[ix[0][:, None, None], ix[1][None, :, None], ix[2][None, None, :]]
+    return jnp.einsum("ijk...,i,j,k->...", patch, _cr_weights(t[0]), _cr_weights(t[1]),
+                      _cr_weights(t[2])), q
+
+
 def _safe_norm(v):
     """``|v|`` with gradient 0 (not NaN) at v = 0."""
     return jnp.sqrt(jnp.maximum(v @ v, 1e-20))
@@ -159,14 +174,7 @@ class ReachSDF:
 
     def sdf(self, x: jax.Array) -> jax.Array:
         """Signed distance at ``x`` (3,): tricubic Catmull-Rom (C1). Scalar, metres."""
-        q = jnp.clip(x, self.lower_left + self.h, self.upper_right - 2 * self.h)   # 4x4x4 stencil fits
-        u = (q - self.lower_left) / self.h
-        i = jnp.floor(u).astype(jnp.int32)
-        t = u - i
-        ix = i[:, None] + jnp.arange(-1, 3)                                        # (3, 4)
-        patch = self.D[ix[0][:, None, None], ix[1][None, :, None], ix[2][None, None, :]]
-        d = jnp.einsum("ijk,i,j,k->", patch, _cr_weights(t[0]), _cr_weights(t[1]),
-                       _cr_weights(t[2]))
+        d, q = _catmull_rom(self.D, self.lower_left, self.h, x)
         return d - _safe_norm(x - q)
 
     def sdf_linear(self, x: jax.Array) -> jax.Array:
@@ -190,6 +198,27 @@ class ReachSDF:
 
 @jax.tree_util.register_dataclass
 @dataclass
+class VectorField:
+    """A 3-vector per grid vertex, interpolated (Catmull-Rom, C1) and normalized; e.g. one IK
+    branch's foot-to-knee direction (:meth:`ReachGrid.contact_field`). Shoulder frame.
+
+    Args:
+        V: (nx, ny, nz, 3) samples.
+        lower_left: (3,) position of sample (0, 0, 0) (m).
+        h: voxel size (m).
+    """
+    V: jax.Array
+    lower_left: jax.Array
+    h: float = field(metadata=dict(static=True))
+
+    def __call__(self, x: jax.Array) -> jax.Array:
+        """The unit vector at ``x`` (3,) (clamped to the grid)."""
+        v, _ = _catmull_rom(self.V, self.lower_left, self.h, x)
+        return v / _safe_norm(v)
+
+
+@jax.tree_util.register_dataclass
+@dataclass
 class ReachGrid:
     """A leg's reach set on a box grid around the shoulder: every IK branch per vertex,
     with the foot each branch's angles put. Shoulder frame. Host (numpy) arrays as built
@@ -202,6 +231,8 @@ class ReachGrid:
         feet: (nx, ny, nz, B, 3) float32, forward kinematics of ``thetas``: the foot the
             stored angles put (the vertex, up to float error, for an IK-built grid; not
             for a grid built from forward kinematics).
+        contact: (nx, ny, nz, B, 3) float32, the unit foot-to-knee direction of each branch
+            (the leg's ``contact_vector``: compare with a surface normal for the ankle cone).
         lower_left: (3,) position of vertex (0, 0, 0), the corner with the smallest x, y, z
             (m). Vertex (i, j, k) sits at ``lower_left + h (i, j, k)``.
         h: voxel size (m).
@@ -209,6 +240,7 @@ class ReachGrid:
     ok: np.ndarray
     thetas: np.ndarray
     feet: np.ndarray
+    contact: np.ndarray
     lower_left: np.ndarray
     h: float = field(metadata=dict(static=True))
 
@@ -225,8 +257,8 @@ class ReachGrid:
     def device(self) -> "ReachGrid":
         """The same grid with JAX arrays (for :meth:`lookup` inside jitted code)."""
         return ReachGrid(ok=jnp.asarray(self.ok), thetas=jnp.asarray(self.thetas),
-                         feet=jnp.asarray(self.feet), lower_left=jnp.asarray(self.lower_left),
-                         h=self.h)
+                         feet=jnp.asarray(self.feet), contact=jnp.asarray(self.contact),
+                         lower_left=jnp.asarray(self.lower_left), h=self.h)
 
     def lookup(self, x: jax.Array):
         """The nearest vertex's branches for a foot position ``x`` (3,), shoulder frame.
@@ -244,6 +276,28 @@ class ReachGrid:
         inside = jnp.all((ijk >= 0) & (ijk < dims))
         i, j, k = jnp.clip(ijk, 0, dims - 1)
         return inside, self.ok[i, j, k] & inside, self.thetas[i, j, k], self.feet[i, j, k]
+
+    def contact_field(self, b: int, pad: int = 4) -> VectorField:
+        """Branch ``b``'s foot-to-knee direction as a smooth field (for the ankle cone in an
+        NLP, with the branch fixed per foot).
+
+        Where branch b is not valid, its samples are replaced by the nearest valid ones (so
+        the interpolation does not mix in meaningless angles near the boundary); padded by
+        repeating the edge.
+
+        Args:
+            b: the branch.
+            pad: cells added on every side (as :meth:`sdf`).
+
+        Returns:
+            A :class:`VectorField`.
+        """
+        valid = self.ok[..., b]
+        _, idx = distance_transform_edt(~valid, return_indices=True)
+        V = self.contact[..., b, :][idx[0], idx[1], idx[2]]
+        V = np.pad(V, [(pad, pad)] * 3 + [(0, 0)], mode="edge")
+        return VectorField(V=jnp.asarray(V, jnp.float32),
+                           lower_left=jnp.asarray(self.lower_left - pad * self.h), h=self.h)
 
     def points(self) -> np.ndarray:
         """(nx, ny, nz, 3) vertex positions (m)."""
@@ -267,14 +321,14 @@ class ReachGrid:
     def save(self, path) -> None:
         """Write to an ``.npz``."""
         np.savez_compressed(path, ok=self.ok, thetas=self.thetas, feet=self.feet,
-                            lower_left=self.lower_left, h=self.h)
+                            contact=self.contact, lower_left=self.lower_left, h=self.h)
 
     @classmethod
     def load(cls, path) -> "ReachGrid":
         """Read from an ``.npz`` written by :meth:`save`."""
         z = np.load(path)
-        return cls(ok=z["ok"], thetas=z["thetas"], feet=z["feet"], lower_left=z["lower_left"],
-                   h=float(z["h"]))
+        return cls(ok=z["ok"], thetas=z["thetas"], feet=z["feet"], contact=z["contact"],
+                   lower_left=z["lower_left"], h=float(z["h"]))
 
 
 def make_reach_grid(leg: Leg, h: float, *, use_limits: bool = True,
@@ -290,7 +344,8 @@ def make_reach_grid(leg: Leg, h: float, *, use_limits: bool = True,
     Args:
         leg, use_limits, keepout: see :func:`branches_fn`.
         h: voxel size (m); rounded so the cube's half-width is a multiple of it. Memory with
-            4 branches (angles and feet), uncropped: 1 cm ~53 MB, 5 mm ~420 MB, 2 mm ~6.4 GB.
+            4 branches (angles, feet, contact directions), uncropped: 1 cm ~80 MB, 5 mm
+            ~620 MB, 2 mm ~9.5 GB.
         half_width: the cube to search; None: the leg's full length (``leg.lengths.sum()``),
             the farthest it can reach.
         crop: cells kept around the bounding box of the reachable vertices; None: keep the
@@ -316,11 +371,13 @@ def make_reach_grid(leg: Leg, h: float, *, use_limits: bool = True,
 
     def with_feet(x):
         ok, thetas = branches(x)
-        return ok, thetas, jax.vmap(lambda t: leg.forward(t).translation()[-1])(thetas)
+        xpos = jax.vmap(lambda t: leg.forward(t).translation())(thetas)       # (B, n+1, 3)
+        v = xpos[:, -2] - xpos[:, -1]                                          # foot -> knee
+        return ok, thetas, xpos[:, -1], v / jnp.linalg.norm(v, axis=-1, keepdims=True)
 
-    ok, thetas, feet = _over_box(jax.jit(jax.vmap(with_feet)), lower_left, h, shape, chunk)
+    ok, thetas, feet, contact = _over_box(jax.jit(jax.vmap(with_feet)), lower_left, h, shape, chunk)
     return ReachGrid(ok=ok, thetas=thetas.astype(np.float32), feet=feet.astype(np.float32),
-                     lower_left=lower_left, h=h)
+                     contact=contact.astype(np.float32), lower_left=lower_left, h=h)
 
 
 def reach_mask(leg: Leg, h: float, *, use_limits: bool = True, keepout: Keepout | None = None,
