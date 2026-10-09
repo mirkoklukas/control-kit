@@ -363,6 +363,41 @@ leans on one foot (normal forces 0.9 / 0.9 / 25.6 N, the margin at its bound); n
 no ankle cone, no leg collisions, no paths between the bodies; SLSQP does not report
 convergence.
 
+## Pitfalls seen so far (2026-10-09)
+
+From the TOWR-style transfer runs (sdf and joint-angle variants). The optimizer finds every
+gap in the model:
+
+- **Collisions are not modelled**: self-collisions (legs crossing each other, the planting
+  leg reaching past its neighbour, legs vs. body) and collisions with the ground (links,
+  knees through the floor). Checked nowhere in the NLP; the solutions use it.
+- **Knife-edge equilibrium**: maximizing progress puts the centre of mass over one foot (all
+  the weight on it, zero margin). Needed a minimum normal force per foot, better a push
+  margin.
+- **Tilting and dropping the body** to extend the reach: roll / pitch at their bounds
+  (+-20 deg), the body down to 8-10 cm. On the floor an exploit; for climbing possibly a
+  feature later (pitching the body up at the floor-to-wall transition, lowering it to reach
+  a far foothold), so bound or penalize it per scenario rather than forbid it.
+- **The bounds decide the optimum**: progress = the translation bound (25 cm); the answer
+  is the box, not the physics.
+- **Footholds in odd places**: the new foothold under the body, next to another foot, or
+  crossing in front of a neighbour; two feet side by side. Foot separation alone does not
+  prevent it.
+- **Feasible forces vs. the servos' forces**: with the foot forces as variables, the NLP
+  proves *some* forces hold the stance; the least-torque split (what the servos settle at)
+  can still fail (full push score negative) while the min-norm push margin is met.
+- **A fixed B is part of the problem**: placed by a heuristic it was near a support edge
+  (one foot at 3.7 N), over the incenter its ankles broke the 45 deg cone; nothing checks
+  a fixed pose.
+- **Approximations bite at the boundary**: the reach grid's zero level is ~h/2 outside the
+  true boundary (use margin >= h); the joint-angle-free centre of mass is off by 6-18 mm;
+  a leg in the air needs some position for the centre of mass.
+- **The ankle cone sits at its bound** (45 deg) whenever reach is tight.
+- **Solver**: SLSQP never reports convergence (always the iteration limit); ~19 ms per
+  iteration, mostly the JAX callbacks (the objective gradient recomputing the whole model,
+  ~5.5 line-search evaluations per iteration). A GPU does not help (small sequential calls:
+  77 s on an A10 vs. 19 s on the laptop CPU).
+
 ## References
 
 Papers:
