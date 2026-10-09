@@ -92,8 +92,7 @@ def play(
     n = len(qpos)
     model_path = Path(model) if model is not None else _ROOT / str(npz["model"])
     print(f"loaded {n} frames from {file} (dt={dt}s); model={model_path}")
-    print("keys: space=pause/resume  left/right=step frame  up/down=speed  "
-          "backspace=restart  esc=close")
+    _print_keys()
 
     # GLFW key codes the passive viewer hands to key_callback.
     SPACE, RIGHT, LEFT, UP, DOWN, ESC, BACKSPACE = 32, 262, 263, 265, 264, 256, 259
@@ -171,6 +170,25 @@ def play(
                 st["idx"] = 0
                 time.sleep(0.3)                      # brief pause, then loop
 
+
+
+_KEYS = [("space", "pause / resume"), ("← / →", "step one frame (pauses)"),
+         ("↑ / ↓", "faster / slower"), ("backspace", "restart from the first frame"),
+         ("esc", "close the viewer")]
+
+
+def _print_keys() -> None:
+    """The playback keys as a small table, one per row."""
+    from rich.console import Console
+    from rich.table import Table
+
+    table = Table(title="playback keys", title_justify="left", title_style="bold",
+                  box=None, show_header=False, padding=(0, 2, 0, 1))
+    table.add_column(style="bold cyan", no_wrap=True)
+    table.add_column(style="dim")
+    for key, action in _KEYS:
+        table.add_row(key, action)
+    Console().print(table)
 
 
 ARROW_WIDTH = 0.01   # m; drawn force arrows and (in replay) contact-force arrows
