@@ -16,13 +16,16 @@ gravity factor at which the planted feet still hold it; s* >= 1: holds, see
 - ``dist_mean``: the mean over the 12 directions (/ weight), the tie-break among postures
   with the same ``dist``;
 - ``tau``: peak |servo torque| of the least-torque foot forces, / ``tau_max``;
-- ``force``: the foot forces under the real gravity, the most central ones (largest
-  common slack on the adhesion and friction limits, :func:`..statics.foot_forces_lp`,
-  solved with HiGHS: qpax is unreliable on this LP); saved for the viewer (arrows: green
+- ``effort``: the least joint loading under g within the limits (min sum tau^2 over the
+  internal forces, :func:`..statics.least_torque_qp`), as RMS sqrt(sum tau^2 / n) / tau_max;
+- ``force``: the foot forces under the real gravity: the least-torque forces within the
+  limits (:func:`..statics.least_torque_qp`, unique); saved for the viewer (arrows: green
   pushes, red pulls).
 
 Postures are ranked by ``rank_by`` (default ``dist``), rounded to 0.01, then by
-``dist_mean``; the resampling accepts a change that raises that order.
+``dist_mean``; the refinement accepts a change that raises that order. ``rank_by=effort``:
+stable postures first (s >= ``s_min`` and dist >= ``dist_min``), among them the lowest
+``effort``; the unstable ones after, by ``dist``.
 
 Scenarios (gravity down in both):
 
@@ -38,15 +41,16 @@ Per (scenario, mode):
 1. **Samples**: ``n_samples`` stances (`Kit.sample_stance`) at body poses jittered around
    the nominal one; the valid ones (kinematic checks: reach, limits, ankle, collisions)
    are scored.
-2. **Resamples**: from the ``top_k`` best, ``rounds`` rounds of local search: nudge the body
+2. **Refined**: from the ``top_k`` best, ``rounds`` rounds of local search: nudge the body
    (feet held) or re-plant one planted leg; keep a change if it stays valid and raises s.
 
     uv run runkit run lab.gait_graph.planner.experiments.scores
     uv run runkit run lab.gait_graph.planner.experiments.scores n_samples=128 rounds=60
-    uv run --extra mjx ctk play lab/gait_graph/planner/experiments/runs/planner_scores/latest/out/wall_lifted_resampled.npz
+    uv run runkit run lab.gait_graph.planner.experiments.scores rank_by=effort
+    uv run --extra mjx python -m lab.gait_graph.planner.view experiments/runs/planner_scores/latest/out/wall_lifted_refined.npz
 
 Prints a table per (scenario, mode). Saves to ``out/``, per (scenario, mode) and stage
-(``samples`` / ``resampled``), for ``ctk play``: ``{scenario}_{mode}_{stage}.npz``, one
+(``samples`` / ``refined``), for ``ctk play``: ``{scenario}_{mode}_{stage}.npz``, one
 posture per frame, best first, 1 s each (space pauses, left / right arrows step; the live
 plot shows s, s_pm and tau of the frame), scene ``{scenario}_scene.xml``.
 """
@@ -60,9 +64,7 @@ import jax
 import jax.numpy as jnp
 import mujoco
 import numpy as np
-from mujoco import mjx
 
-from controlkit.kinematics.types import Posture
 from controlkit.se3 import SE3
 from runkit import Experiment, RunContext
 
@@ -72,14 +74,12 @@ from ..climb_model.config import MjModelCfg
 from ..climb_model.mjmodel import build, make_robot
 from ..climb_statics import ClimbModel
 from ..stance import Kit, all_ok
-from scipy.optimize import linprog
-
-from ..statics import (disturbance_margin, foot_forces_lp, hold_margin, least_torque,
-                       point_mass_statics)
+from ..scoring import G, make_scorer, rank_key, stable
+from ..statics import least_torque_qp
 
 REPO = Path(__file__).resolve().parents[4]
 LIFTED = 0                                     # the left front leg
-G = jnp.array([0.0, 0.0, -9.81])
+CHUNK = 128                                    # postures per vmapped scoring call
 
 
 @dataclasses.dataclass
@@ -89,18 +89,20 @@ class ScoresCfg:
     scenarios: str = "floor,wall"   # which scenarios to run
     modes: str = "full,lifted"      # which modes to run
     n_samples: int = 64             # stance samples per (scenario, mode)
-    top_k: int = 8                  # resample from this many best samples
-    rounds: int = 40                # local-search rounds per resampled posture
+    top_k: int = 8                  # refine this many best samples (0: no refinement)
+    rounds: int = 40                # local-search rounds per refined posture
     lift_height: float = 0.03       # leg 0 lifted this far, along its surface normal (m)
     adhesion: float = 40.0          # A, per foot (N)
     mu: float = 0.5                 # friction coefficient
     body_xy: float = 0.05           # sample jitter in the surface plane (m)
     body_dz: float = 0.03           # sample jitter along the surface normal (m)
     body_rot_deg: float = 10.0      # sample jitter in yaw (pitch / roll: a third) (deg)
-    nudge_xy: float = 0.01          # resample: body nudge in the surface plane (m)
-    nudge_rot_deg: float = 3.0      # resample: body nudge in yaw (deg)
-    p_body: float = 0.5             # resample: probability of a body nudge (else a leg)
-    rank_by: str = "dist"           # the score that ranks and that the resampling raises
+    nudge_xy: float = 0.01          # refine: body nudge in the surface plane (m)
+    nudge_rot_deg: float = 3.0      # refine: body nudge in yaw (deg)
+    p_body: float = 0.5             # refine: probability of a body nudge (else a leg)
+    rank_by: str = "dist"           # the score that ranks and that the refinement raises; effort
+    s_min: float = 1.5              # rank_by=effort: stable if s >= s_min ...
+    dist_min: float = 0.25          # ... and dist >= dist_min
     wall_x: float = 0.45            # wall face at this x (normal -x)
     wall_body_z: float = 0.6        # body height on the wall (world z)
     seed: int = 0
@@ -159,73 +161,45 @@ def scene_xml(cfg: ScoresCfg, boxes) -> str:
     spec, _ = build(cfg.mjmodel, write=False)
     for i, (c, h) in enumerate(boxes[1:]):
         spec.worldbody.add_geom(name=f"terrain{i}", type=mujoco.mjtGeom.mjGEOM_BOX,
-                                pos=list(c), size=list(h), rgba=[0.55, 0.55, 0.6, 1])
+                                pos=list(c), size=list(h), rgba=[0.55, 0.55, 0.6, 1],
+                                friction=[cfg.mjmodel.pad_friction, 0.005, 0.0001])
     return spec.to_xml()
 
 
 # ----------------------------------------------------------------------------- scoring
-def make_scorer(cm: ClimbModel, footholds, planted_idx, adhesion, mu):
-    """A jitted, batched score function for postures on stances with ``planted_idx`` down.
+def foot_forces(cm: ClimbModel, footholds, items, planted_idx, adhesion, mu):
+    """The foot forces of each (posture, stance) under the real gravity: the least-torque
+    forces within the limits (:func:`..statics.least_torque_qp`, unique). For the viewer.
 
     Returns:
-        ``score(postures, stances) -> dict`` of (N,) arrays: ``s``, ``s_pm``, ``dist``
-        (disturbance margin / weight, 0 where s < 1), ``tau`` (peak |torque| / tau_max),
-        ``viol`` (the hold LP solution's constraint violation).
-    """
-    idx = np.asarray(planted_idx)
-    planted = jnp.asarray([j in planted_idx for j in range(cm.mj.num_legs)])
-    tau_max = float(cm.mj.forcerange[1])
-
-    def one(posture, stance):
-        normals = footholds.normal[stance]                             # (L, 3)
-        q = cm.qpos(posture, normals)
-        st = cm.statics(q, G)
-        s, _, viol = hold_margin(st, planted_idx, normals[idx], adhesion, mu, tau_max)
-        d = mjx.forward(cm.mx, mjx.make_data(cm.mx).replace(qpos=q))
-        pm = point_mass_statics(d.subtree_com[1], d.xpos[cm.foot_ids], cm.mass, G)
-        s_pm = hold_margin(pm, planted_idx, normals[idx], adhesion, mu, None)[0]
-        _, tau = least_torque(st, planted)
-        dist, lam, _ = disturbance_margin(st, planted_idx, normals[idx], adhesion, mu, tau_max)
-        w = cm.mass * 9.81
-        holds = s >= 1.0
-        return dict(s=s, s_pm=s_pm, dist=jnp.where(holds, dist / w, 0.0),
-                    dist_mean=jnp.where(holds, lam.mean() / w, 0.0),
-                    tau=jnp.abs(tau).max() / tau_max, viol=viol)
-
-    return jax.jit(jax.vmap(one))
-
-
-def forces_highs(cm: ClimbModel, footholds, items, planted_idx, adhesion, mu):
-    """The foot forces of each (posture, stance) under the real gravity, the most central
-    ones (:func:`..statics.foot_forces_lp`), solved exactly with HiGHS (qpax is unreliable
-    on this LP). For the viewer only.
-
-    Returns:
-        (N, L, 3) forces, world frame (N); 0 for the lifted leg (and where HiGHS fails).
+        (N, L, 3) forces, world frame (N); 0 for the lifted leg, and where the QP has no
+        solution (the posture does not hold: violation > 1e-2).
     """
     idx = np.asarray(planted_idx)
     tau_max = float(cm.mj.forcerange[1])
 
     @jax.jit
-    def lp(posture, stance):
+    @jax.vmap
+    def qp(posture, stance):
         normals = footholds.normal[stance]
         st = cm.statics(cm.qpos(posture, normals), G)
-        return foot_forces_lp(st, planted_idx, normals[idx], adhesion, mu, tau_max)
+        F, _, viol = least_torque_qp(st, planted_idx, normals[idx], adhesion, mu, tau_max)
+        return F, viol
 
+    parts = [qp(_stack([p for p, _ in items[i: i + CHUNK]]),
+                jnp.stack([s_ for _, s_ in items[i: i + CHUNK]]))
+             for i in range(0, len(items), CHUNK)]
+    F = np.concatenate([np.asarray(f) for f, _ in parts])
+    viol = np.concatenate([np.asarray(v) for _, v in parts])
     out = np.zeros((len(items), cm.mj.num_legs, 3))
-    for k, (post, st) in enumerate(items):
-        c, A_eq, b_eq, G_in, h = (np.asarray(a, float) for a in lp(post, st))
-        r = linprog(c, A_ub=G_in, b_ub=h, A_eq=A_eq, b_eq=b_eq, bounds=(None, None),
-                    method="highs")
-        if r.status == 0:
-            out[k, idx] = r.x[:-1].reshape(-1, 3)
+    out[:, idx] = np.where(viol[:, None, None] < 1e-2, F, 0.0)
     return out
 
 
-def rank_key(sc: dict, key: str) -> np.ndarray:
-    """A sortable rank value: ``key`` rounded to 0.01 first, ``dist_mean`` breaks ties
-    (higher is better)."""
-    return np.round(np.asarray(sc[key]), 2) * 1e3 + np.asarray(sc["dist_mean"])
+def _height(name: str, cfg: ScoresCfg, posture) -> float:
+    """The body's (base origin's) distance to the surface along its normal (m)."""
+    p = np.asarray(posture.body.translation())
+    return float(cfg.wall_x - p[0]) if name == "wall" else float(p[2])
 
 
 def _stack(items):
@@ -235,7 +209,7 @@ def _stack(items):
 # ----------------------------------------------------------------------------- run
 def run_one(cfg: ScoresCfg, cm: ClimbModel, name: str, mode: str, ctx: RunContext,
             rng: np.random.Generator) -> dict:
-    """Samples and resamples for one (scenario, mode); prints, saves the replays."""
+    """Samples and refines them, for one (scenario, mode); prints, saves the replays."""
     boxes, nominal = scenario(name, cfg)
     gcfg = climb_cfg(cfg.mjmodel, boxes=boxes,
                      num_footholds=40_000 if name == "floor" else 80_000)
@@ -247,7 +221,17 @@ def run_one(cfg: ScoresCfg, cm: ClimbModel, name: str, mode: str, ctx: RunContex
     L = cfg.mjmodel.num_legs
     planted_idx = tuple(range(L)) if mode == "full" else tuple(j for j in range(L) if j != LIFTED)
     planted = jnp.asarray([j in planted_idx for j in range(L)])
-    score = make_scorer(cm, fh, planted_idx, cfg.adhesion, cfg.mu)
+    score = make_scorer(cm, fh, planted_idx, cfg.adhesion, cfg.mu, effort=True)
+
+    def rank_key_(x):
+        return rank_key(x, cfg.rank_by, cfg.s_min, cfg.dist_min)
+
+    def score_all(items):
+        """Score (posture, stance) pairs in chunks of ``CHUNK`` (one vmap each)."""
+        parts = [score(_stack([p for p, _ in items[i: i + CHUNK]]),
+                       jnp.stack([s_ for _, s_ in items[i: i + CHUNK]]))
+                 for i in range(0, len(items), CHUNK)]
+        return {k: np.concatenate([np.asarray(x[k]) for x in parts]) for k in parts[0]}
 
     def valid(posture, stance):
         return bool(all_ok(kit.checks(posture, stance, planted)))
@@ -270,16 +254,15 @@ def run_one(cfg: ScoresCfg, cm: ClimbModel, name: str, mode: str, ctx: RunContex
     if not samples:
         print(f"\n[{name} / {mode}] no valid samples")
         return {}
-    sc = {k: np.asarray(v) for k, v in score(_stack([p for p, _ in samples]),
-                                              jnp.stack([s for _, s in samples])).items()}
+    sc = score_all(samples)
     t_samples = time.perf_counter() - t0
 
-    # --- 2. resamples: local search from the top k
+    # --- 2. refined: local search from the top k
     t0 = time.perf_counter()
     key_ = cfg.rank_by
-    rk = rank_key(sc, key_)
+    rk = rank_key_(sc)
     order = np.argsort(-rk)
-    resampled, accepted = [], 0
+    refined, accepted = [], 0
     for j in order[: cfg.top_k]:
         post, st = samples[j]
         best = float(rk[j])
@@ -297,35 +280,38 @@ def run_one(cfg: ScoresCfg, cm: ClimbModel, name: str, mode: str, ctx: RunContex
                 ok = bool(ok) and valid(new, new_st)
             if not bool(ok):
                 continue
-            s_new = float(rank_key(score(_stack([new]), new_st[None]), key_)[0])
+            s_new = float(rank_key_(score(_stack([new]), new_st[None]))[0])
             if s_new > best:
                 post, st, best = new, new_st, s_new
                 accepted += 1
-        resampled.append((post, st))
-    rc = {k: np.asarray(v) for k, v in score(_stack([p for p, _ in resampled]),
-                                              jnp.stack([s for _, s in resampled])).items()}
-    t_resamples = time.perf_counter() - t0
+        refined.append((post, st))
+    rc = score_all(refined) if refined else None
+    t_refined = time.perf_counter() - t0
 
     # --- print
     print(f"\n[{name} / {mode}] {len(samples)}/{cfg.n_samples} valid samples ({t_samples:.0f} s); "
-          f"resampled top {len(resampled)} x {cfg.rounds} rounds, {accepted} improvements "
-          f"({t_resamples:.0f} s)")
-    o_s, o_r = np.argsort(-rank_key(sc, key_)), np.argsort(-rank_key(rc, key_))
+          + (f"refined top {len(refined)} x {cfg.rounds} rounds, {accepted} improvements "
+             f"({t_refined:.0f} s)" if refined else "no refinement (top_k = 0)"))
+    o_s = np.argsort(-rank_key_(sc))
     _table(f"samples, best {key_} first (top 5, bottom 5)", sc,
-           np.concatenate([o_s[:5], o_s[-5:]]) if len(o_s) > 10 else o_s, len(samples))
-    _table(f"resampled, best {key_} first", rc, o_r, len(resampled))
+           np.concatenate([o_s[:5], o_s[-5:]]) if len(o_s) > 10 else o_s, len(samples), cfg)
+    if refined:
+        _table(f"refined, best {key_} first", rc, np.argsort(-rank_key_(rc)), len(refined), cfg)
 
     # --- save the replays
     xml = ctx.out / f"{name}_scene.xml"
     xml.write_text(scene_xml(cfg, boxes))
-    for stage, items, scores in (("samples", samples, sc), ("resampled", resampled, rc)):
-        o = np.argsort(-rank_key(scores, key_))
+    stages = (("samples", samples, sc),) + ((("refined", refined, rc),) if refined else ())
+    for stage, items, scores in stages:
+        o = np.argsort(-rank_key_(scores))
         qpos = np.stack([np.asarray(cm.qpos(items[i][0], fh.normal[items[i][1]])) for i in o])
+        height = np.array([_height(name, cfg, p) for p, _ in items])
         plot = np.stack([scores["s"][o], scores["s_pm"][o], scores["dist"][o],
-                         scores["dist_mean"][o], scores["tau"][o]], -1)
+                         scores["dist_mean"][o], scores["tau"][o],
+                         np.minimum(scores["effort"][o], 2.0), height[o]], -1)
         path = ctx.out / f"{name}_{mode}_{stage}.npz"
         normals = np.stack([np.asarray(fh.normal[items[i][1]]) for i in o])
-        forces = forces_highs(cm, fh, [items[i] for i in o], planted_idx, cfg.adhesion, cfg.mu)
+        forces = foot_forces(cm, fh, [items[i] for i in o], planted_idx, cfg.adhesion, cfg.mu)
         np.savez(path, qpos=qpos, qvel=np.zeros((len(o), cm.model.nv)), timestep=1.0,
                  foot_force=forces, foot_normal=normals,
                  foot_planted=np.array([j in planted_idx for j in range(L)]),
@@ -333,16 +319,20 @@ def run_one(cfg: ScoresCfg, cm: ClimbModel, name: str, mode: str, ctx: RunContex
                  pad_drop=cfg.mjmodel.pivot_height + cfg.mjmodel.pad_thickness,
                  model=_model_path(xml), plot=plot,
                  plot_labels=np.array(["s* full", "s* point mass", "disturbance / weight",
-                                       "disturbance mean / weight", "peak tau / max"]),
+                                       "disturbance mean / weight", "peak tau / max",
+                                       "effort (RMS tau / max)", "body height (m)"]),
                  plot_title=f"{name} / {mode} / {stage}")
-    print(f"  saved {name}_{mode}_{{samples,resampled}}.npz (+ {name}_scene.xml)")
+    print(f"  saved {name}_{mode}_{{{','.join(x[0] for x in stages)}}}.npz (+ {name}_scene.xml)")
 
     def stats(x):
+        st_ = stable(x, cfg.s_min, cfg.dist_min)
         return {"holds": round(float(np.mean(x["s"] >= 1)), 3),
+                "stable": round(float(np.mean(st_)), 3),
+                "effort_min_stable": round(float(x["effort"][st_].min()), 3) if st_.any() else None,
                 "s_median": round(float(np.median(x["s"])), 3),
                 "dist_median": round(float(np.median(x["dist"])), 3),
                 "dist_max": round(float(x["dist"].max()), 3)}
-    return {"samples": stats(sc) | {"n": len(samples)}, "resampled": stats(rc)}
+    return {"samples": stats(sc) | {"n": len(samples)}} | ({"refined": stats(rc)} if refined else {})
 
 
 def _model_path(xml: Path) -> str:
@@ -354,13 +344,16 @@ def _model_path(xml: Path) -> str:
         return str(xml.resolve())
 
 
-def _table(title, sc, rows, n):
-    print(f"  {title}, of {n}:")
+def _table(title, sc, rows, n, cfg):
+    st_ = stable(sc, cfg.s_min, cfg.dist_min)
+    print(f"  {title}, of {n} ({int(st_.sum())} stable: s >= {cfg.s_min}, dist >= {cfg.dist_min}):")
     print(f"  {'s* full':>8} | {'s* point mass':>13} | {'dist / weight':>13} "
-          f"| {'dist mean':>9} | {'peak tau/max':>12} | {'violation':>9}")
+          f"| {'dist mean':>9} | {'peak tau/max':>12} | {'effort':>6} | {'stable':>6} "
+          f"| {'violation':>9}")
     for i in rows:
         print(f"  {sc['s'][i]:8.2f} | {sc['s_pm'][i]:13.2f} | {sc['dist'][i]:13.2f} "
-              f"| {sc['dist_mean'][i]:9.2f} | {sc['tau'][i]:12.2f} | {sc['viol'][i]:9.1e}")
+              f"| {sc['dist_mean'][i]:9.2f} | {sc['tau'][i]:12.2f} | {sc['effort'][i]:6.3f} "
+              f"| {'yes' if st_[i] else 'no':>6} | {sc['viol'][i]:9.1e}")
 
 
 exp = Experiment("planner_scores")
@@ -371,7 +364,7 @@ def run(cfg: ScoresCfg, ctx: RunContext) -> dict:
     """Run every (scenario, mode); see the module docstring.
 
     Returns:
-        Per (scenario, mode): samples (n, share holding, median / max s) and resampled.
+        Per (scenario, mode): samples (n, share holding, median / max s) and refined.
     """
     cm = ClimbModel(cfg.mjmodel)
     rng = np.random.default_rng(cfg.seed)

@@ -21,7 +21,7 @@ are next. v0: flat ground, move along +x, fixed crawl order.
 | `stance.py` | stances, witness postures and moves (`Kit`: sample a stance, lift / move / re-plant a leg, checks) for the climb robot: a copy of `gait_graph/stance_3dof.py` with the square trunk |
 | `climb_statics.py` | `ClimbModel`: the climb model set up for `statics.py` (no adhesion actuators for MJX), posture -> `qpos` with the pads laid flat, torques on the 12 servos only |
 | `experiments/torques.py` | runkit experiment `planner_torques`: min-norm vs. least-torque torques of sampled stances (`gait_graph` robot) |
-| `experiments/scores.py` | runkit experiment `planner_scores`: score functions on sampled and resampled postures of the climb robot, floor and wall, full stance and left front leg lifted; saves replays with the scores and foot forces |
+| `experiments/scores.py` | runkit experiment `planner_scores`: score functions on sampled and refined postures of the climb robot, floor and wall, full stance and left front leg lifted; saves replays with the scores and foot forces |
 | `view.py` | viewer for the scores replays: up / down = good / bad list, left / right = previous / next, `,` / `.` = 10 back / ahead; foot force arrows (green push, red pull) and friction cones with adhesion at the contact points, the wall as a wireframe |
 | `experiments/experiment.toml` | runkit settings for `experiments/` (runs in `experiments/runs/`, prints its own output) |
 

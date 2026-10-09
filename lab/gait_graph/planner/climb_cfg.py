@@ -8,7 +8,7 @@ Mapping (``Cfg`` field <- ``MjModelCfg``):
 
 - ``num_legs``, ``mount_radius``, ``leg_lengths``, ``joint_limits_deg``,
   ``body_half_height``, ``link_radius``: as is.
-- ``tibia_radius``: ``link_radius`` (the climb tibia is as thick as the other links).
+- ``coxa_radius``, ``link_radius`` (the femur), ``tibia_radius``: ``link_radii``.
 - ``foot_radius``: the ankle pivot's height above the pad face, ``pivot_height +
   pad_thickness``. The stance code places the "foot" (the pivot) that far above the
   foothold along its normal: a flat pad on the surface.
@@ -29,7 +29,8 @@ class ClimbCfg(Cfg):
     The robot dimensions are filled in by :func:`climb_cfg`; the rest are defaults for its
     size (half of `gait_graph`'s robot).
     """
-    tibia_radius: float = 0.012
+    coxa_radius: float = 0.015
+    tibia_radius: float = 0.009
 
     # validity, scaled to the climb robot (gait_graph's robot is ~2x larger)
     min_foot_separation: float = 0.06    # pads are 40 mm wide
@@ -58,7 +59,8 @@ def climb_cfg(mj: MjModelCfg = None, **overrides) -> ClimbCfg:
     dims = dict(
         num_legs=mj.num_legs, mount_radius=mj.mount_radius, leg_lengths=tuple(mj.leg_lengths),
         joint_limits_deg=tuple(tuple(l) for l in mj.joint_limits_deg),
-        body_half_height=mj.body_half_height, link_radius=mj.link_radius,
-        tibia_radius=mj.link_radius, foot_radius=mj.pivot_height + mj.pad_thickness,
+        body_half_height=mj.body_half_height, coxa_radius=mj.link_radii[0],
+        link_radius=mj.link_radii[1], tibia_radius=mj.link_radii[2],
+        foot_radius=mj.pivot_height + mj.pad_thickness,
         ankle_limit_deg=mj.ankle_range_deg, body_height=mj.stand_height)
     return replace(ClimbCfg(), **(dims | overrides))

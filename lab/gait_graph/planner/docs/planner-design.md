@@ -26,6 +26,67 @@ edge. In the dual view both belong to the edge.
 (all feet down), and `gait_graph` already uses it ("graph type A": nodes share three
 of four footholds).
 
+### Revisited (2026-10-07): the tripod view, transfers and swings
+
+The primal view, made explicit; it is the clearer one for what must hold where.
+
+**Nodes: tripod stances** $T$ (three feet planted, one leg in the air): the critical
+states, where stability is at stake.
+
+**Edges: transfers** $(T, S, T')$. From tripod $T$ to the next tripod $T'$ through the
+full stance $S$, with two body poses (postures):
+
+| pose | supports | reaches |
+|---|---|---|
+| $B_{\text{plant}}$ | $T$ (the leg in the air lands from here) | $S$ |
+| $B_{\text{lift}}$ | $T'$ (the next leg lifts from here) | $S$ |
+
+On the edge the robot stands on all four feet of $S$ and the body moves
+$B_{\text{plant}} \to B_{\text{lift}}$: the load is transferred from $T$ to $T'$. $S$ is
+$T$ plus the new foothold of the leg that was in the air, so an edge carries three
+choices: that foothold and the two bodies.
+
+- Both bodies reach $S$: an edge is one four-foot stance with a body motion inside it.
+- Requiring them to support $S$ as well is nearly free: $S$ has every foot of $T$ (and of
+  $T'$), so a body supporting $T$ supports $S$ (the extra foot can only help, given free
+  internal forces; with the fixed least-torque split of the fast check not strictly
+  guaranteed). Keep it at most as a check.
+- The motion on the edge is on four feet, the most stable phase; a path check on $S$
+  (cheap) would cover it.
+
+**Swings** $(S, T', S')$: one leg moves. Lift it from $S$ (at $B_{\text{lift}}$), the
+robot on $T'$, plant it (at the next edge's $B_{\text{plant}}$): $S'$. Inside the node
+$T'$ the body may move from $B_{\text{lift}}$ to $B_{\text{plant}}$ with the leg in the
+air, then $T'$ must hold along that path; or not move ($B_{\text{plant}} = B_{\text{lift}}$
+per node: the body moves only on edges, a static crawl).
+
+**Terminology.**
+
+- **transfer**: $(T, S, T')$, an edge of the tripod graph: the load moves from one tripod
+  to the next through a four-foot stance, the body moves.
+- **swing**: $(S, T', S')$, an edge of the stance graph (the dual view above): one leg moves.
+  What `plan_step` / `plan_step_fast` plan (there called a "step", S to S').
+
+The four legs of a transfer $(T, S, T')$:
+
+- **planting leg** $i$: in the air in $T$, planted from $B_{\text{plant}}$; it closes $S$.
+- **lifting leg** $i'$: planted in $S$, lifted at $B_{\text{lift}}$; it opens $T'$.
+- **transfer legs** (the **transfer pair**): the other two, planted throughout ($T$, $S$
+  and $T'$): the legs $T$ and $T'$ share.
+- **transfer axis**: the line through the transfer legs' feet, the common side of the
+  support triangles of $T$ and $T'$, or a diagonal of the support quadrilateral. In a
+  crawl (1, 0, 2, 3) it alternates: a side for the transfers 1 -> 0 and 2 -> 3, a diagonal
+  for 0 -> 2 and 3 -> 1. On a diagonal the two support triangles lie on opposite sides of
+  it (they overlap only on the axis), so without adhesion the body has to cross the
+  transfer axis during the transfer, on four feet.
+
+**In the fast planner** (`step_fast.py`), one swing of leg $i$ is: B_lift (sampled with
+the four feet of $S$ held, supporting $T' = S \setminus \{i\}$), lift, B_plant (with
+``plant_shift``: a shift with leg $i$ in the air, $T'$ held along the path), plant. So a
+transfer edge is (B_plant of one swing, $S'$, B_lift of the next). ``plant_shift=False``
+is "no motion inside the nodes": the static crawl (2026-10-07: 12 steps, 0.42 m on the
+floor without magnets).
+
 ## Notation
 
 | symbol | meaning |
@@ -248,6 +309,13 @@ linear torque bounds). Convex: a global answer, fast.
 **Implemented** in `statics.py` (2026-10-05): the margin as the largest gravity factor
 $s^*$, an LP with friction pyramids, solved with `qpax`.
 
+**Name: the (gravity) hold margin.** The largest factor $\sigma^*$ by which gravity can be
+scaled (body and legs) with the stance still holding; adhesion $A$, friction $\mu$ and
+$\tau_{\max}$ stay fixed. $\sigma^* \in [0, 10]$: $\ge 1$ holds under $g$; $10$ is the cap
+(no physical limit reached). The internal forces ($3p - 6$ of them) are chosen by the LP,
+so it is the best case over load sharings. In code: `hold_margin` / `hold_lp`, scorer
+key `s`; written $s^*$ above, $\sigma^*$ in `mechanics-2d.md` (where $s$ is the squeeze).
+
 ### Actuator torques for a given stance and body pose
 
 Given a stance and a body pose, IK gives $q$, so the posture $P$ is fixed. The torques
@@ -275,6 +343,8 @@ With position servos $z$ is not chosen directly: internal forces come from offse
 servo targets and actual angles (pre-load). A controller could shape them (e.g. squeeze
 the feet by commanding a slightly narrower stance); by default you get what the
 compliance gives. So (2) says what is achievable, (3) what you get without trying.
+(Derived in `statics.md`, section 5: with equal stiffness and no misfit, (3) is (2) without
+the limits.)
 
 **For the planner:** (2), the least achievable peak torque, as part of the hold margin.
 

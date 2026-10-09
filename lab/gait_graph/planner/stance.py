@@ -78,8 +78,9 @@ def body_boxes(cfg: Cfg, body: SE3) -> collision.OBB:
 
 
 def _link_radii(cfg: Cfg) -> jax.Array:
-    """Per-link radius: coxa and femur ``link_radius``, tibia ``tibia_radius``."""
-    return jnp.array([cfg.link_radius, cfg.link_radius, cfg.tibia_radius])
+    """Per-link radius: coxa ``coxa_radius``, femur ``link_radius``, tibia ``tibia_radius``."""
+    return jnp.array([getattr(cfg, "coxa_radius", cfg.link_radius), cfg.link_radius,
+                      cfg.tibia_radius])
 
 
 def _cloud_radii(leg, cfg: Cfg) -> jax.Array:
@@ -237,20 +238,21 @@ def candidates_at(robot: Robot, cfg: Cfg, footholds: Foothold, priority: jax.Arr
     return Candidates(idx, vals > -jnp.inf)
 
 def _plant(key, robot: Robot, scene, cfg: Cfg, shoulder: SE3, body_box, site: Foothold):
-    """Try ``cfg.reach_samples`` plants of one leg on ``site``; keep a valid one.
+    """Plant one leg on ``site``: every IK branch (at most four for a 3-DOF leg), checked;
+    one valid branch drawn uniformly. (``cfg.reach_samples`` random draws among the same
+    branches would only repeat work; it is not used.)
 
     Returns:
-        ``(ok, theta)``: whether some plant passed every :func:`leg_checks`, and it.
+        ``(ok, theta)``: whether some branch passed every :func:`leg_checks`, and it.
     """
     local = Foothold(foot_center(cfg, site), site.normal).transform(shoulder.inverse())
+    reach, thetas = robot.leg.ik_from_foot(local.position)                   # (4,), (4, 3)
 
-    def one(k):
-        ok, theta = robot.leg.sample_planted(k, local)
-        c = leg_checks(robot, scene, cfg, shoulder, body_box, theta, site, True)
-        return ok & all_ok(c), theta
+    def check(theta):
+        return all_ok(leg_checks(robot, scene, cfg, shoulder, body_box, theta, site, True))
 
-    oks, thetas = jax.vmap(one)(jax.random.split(key, cfg.reach_samples))
-    i = jnp.argmax(oks)
+    oks = reach & jax.vmap(check)(thetas)
+    i = candidates.sample(key, jnp.zeros(oks.shape), oks)
     return oks[i], thetas[i]
 
 

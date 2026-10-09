@@ -39,7 +39,8 @@ import jax.numpy as jnp
 import qpax
 from mujoco import mjx
 
-NULL_TOL = 1e-9     # singular values below this (relative to the largest) span the null space
+NULL_TOL = 1e-5     # singular values below this (relative to the largest) span the null space
+                    # (float32: the numerically zero ones come out around 1e-7, not 1e-9)
 PYRAMID_FACES = 8   # friction cone -> inner pyramid with this many faces
 S_CAP = 10.0        # upper bound on the gravity factor s (keeps the LP bounded)
 
@@ -402,6 +403,259 @@ def foot_forces(st: Statics, planted_idx, normals, adhesion, mu, tau_max, faces=
 
 
 # --------------------------------------------------------------------------- #
+# Least torque within the limits                                              #
+# --------------------------------------------------------------------------- #
+def cones_ok(F, normals, adhesion, mu, faces=PYRAMID_FACES, tol=1e-6):
+    """Whether the planted feet's forces are within their contact limits: adhesion
+    (``n . F >= -A``) and the friction pyramid around the adhesion-shifted normal force,
+    as in :func:`hold_lp`.
+
+    Args:
+        F: (p, 3) the planted feet's forces (N).
+        normals: (p, 3) unit surface normals.
+        adhesion, mu, faces: see :func:`hold_lp`.
+        tol: slack allowed on every row (N).
+
+    Returns:
+        A tuple ``(ok, per_foot)``: scalar bool, (p,) bool.
+    """
+    mu_p = mu * math.cos(math.pi / faces)
+    angles = 2 * math.pi * jnp.arange(faces) / faces
+
+    def foot(f, n):
+        t1, t2 = _tangents(n)
+        d = jnp.cos(angles)[:, None] * t1 + jnp.sin(angles)[:, None] * t2
+        fn = f @ n
+        return (fn >= -adhesion - tol) & jnp.all(d @ f <= mu_p * (fn + adhesion) + tol)
+
+    per = jax.vmap(foot)(F, jnp.asarray(normals, float))
+    return jnp.all(per), per
+
+
+def cone_margin(F, normals, adhesion, mu):
+    """How far inside its contact cone each planted foot's force is: the Euclidean
+    distance of the adhesion-shifted force ``F + A n`` to the surface of the round cone of
+    half-angle ``atan(mu)`` (apex at the origin, axis ``n``).
+
+    With ``a = n . (F + A n)`` and ``t`` the size of the tangential part:
+    ``d = (mu a - t) / sqrt(1 + mu^2)``. Covers adhesion and friction together; ``d >= 0``
+    iff inside the round cone. (The LPs use the inscribed 8-face pyramid, slightly
+    stricter: pass ``mu * cos(pi / 8)`` for a margin that is ``>= 0`` only inside it.)
+    Behind the apex (``a < 0``, pulled harder than A) ``d`` is negative but not the exact
+    distance.
+
+    Args:
+        F: (p, 3) the planted feet's forces (N).
+        normals: (p, 3) unit surface normals.
+        adhesion: A per foot (N).
+        mu: friction coefficient (of the cone used).
+
+    Returns:
+        A tuple ``(min, per_foot)``: the smallest margin (N), (p,) margins (N).
+    """
+    n = jnp.asarray(normals, float)
+    Fs = F + adhesion * n
+    a = jnp.sum(Fs * n, -1)
+    t = jnp.linalg.norm(Fs - a[:, None] * n, axis=-1)
+    d = (mu * a - t) / math.sqrt(1.0 + mu ** 2)
+    return d.min(), d
+
+
+def within_limits(F, tau, normals, adhesion, mu, tau_max, faces=PYRAMID_FACES, tol=1e-6):
+    """Whether the planted feet's forces and the torques satisfy the limits of :func:`hold_lp`:
+    the contact limits (:func:`cones_ok`) and ``|tau| <= tau_max`` (if not None).
+
+    Args:
+        F: (p, 3) the planted feet's forces (N).
+        tau: (nj,) the servo torques (N m).
+        normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        tol: slack allowed on every row (N, N m).
+
+    Returns:
+        Scalar bool: True if every limit holds.
+    """
+    ok = cones_ok(F, normals, adhesion, mu, faces, tol)[0]
+    if tau_max is not None:
+        ok = ok & jnp.all(jnp.abs(tau) <= tau_max + tol)
+    return ok
+
+
+def least_torque_kkt(st: Statics, planted_idx, reg=1e-8):
+    """The least-torque forces of the planted feet and their response to a body push, from
+    one linear solve: smooth in the posture (for the NLP refine, ``docs/trajopt-nlp.md``).
+
+    The KKT (Karush-Kuhn-Tucker) conditions of ``min |b_a - M F|^2 s.t. G F = b_b``
+    (``M``: forces to servo torques, ``G``: forces to the base wrench), with a multiplier
+    ``mu`` (6,) for equilibrium:
+
+        [[M'M + reg I, G'], [G, 0]] [F; mu] = [M' b_a; b_b]
+
+    The same matrix with right-hand side ``[0; w]`` gives the extra forces carrying an extra
+    base load ``w`` (a push): ``F(b_b + w) = F + H w``. Equals :func:`least_torque` (up to
+    ``reg``) where the matrix is invertible (feet not on a line, no kinematic singularity).
+
+    Args:
+        st: the posture's statics.
+        planted_idx: tuple of the planted feet (static).
+        reg: Tikhonov term on the forces (keeps the matrix invertible).
+
+    Returns:
+        A tuple ``(F, tau, H, M)``: (p, 3) forces (N), (nj,) servo torques (N m),
+        (3p, 6) push map (``F_e = F + (H @ w).reshape(p, 3)``), (nj, 3p) force-to-torque
+        map (``tau_e = b_a - M F_e``).
+    """
+    idx = jnp.asarray(planted_idx)
+    p = len(planted_idx)
+    G = jnp.transpose(st.J_base[idx], (1, 0, 2)).reshape(6, 3 * p)
+    M = jnp.transpose(st.J_joint[idx], (1, 0, 2)).reshape(-1, 3 * p)
+    K = jnp.block([[M.T @ M + reg * jnp.eye(3 * p), G.T], [G, jnp.zeros((6, 6))]])
+    rhs = jnp.concatenate([jnp.concatenate([M.T @ st.bias_joint, st.bias_base])[:, None],
+                           jnp.concatenate([jnp.zeros((3 * p, 6)), jnp.eye(6)])], 1)
+    sol = jnp.linalg.solve(K, rhs)                                   # (3p + 6, 7)
+    F = sol[: 3 * p, 0]
+    H = sol[: 3 * p, 1:]
+    return F.reshape(p, 3), st.bias_joint - M @ F, H, M
+
+
+def limit_rows(F, tau, normals, adhesion, mu, tau_max, faces=PYRAMID_FACES):
+    """The limits of :func:`hold_lp` as smooth rows ``g <= 0`` (for the NLP): per planted
+    foot adhesion and the friction pyramid, per servo ``|tau| <= tau_max``.
+
+    Args:
+        F: (p, 3) forces (N); tau: (nj,) torques (N m).
+        normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+
+    Returns:
+        (p (faces + 1) + 2 nj,) row values, <= 0 where the limit holds (N, N m).
+    """
+    mu_p = mu * math.cos(math.pi / faces)
+    angles = 2 * math.pi * jnp.arange(faces) / faces
+
+    def foot(f, n):
+        t1, t2 = _tangents(n)
+        d = jnp.cos(angles)[:, None] * t1 + jnp.sin(angles)[:, None] * t2
+        fn = f @ n
+        return jnp.concatenate([jnp.array([-fn - adhesion]), d @ f - mu_p * (fn + adhesion)])
+
+    rows = jax.vmap(foot)(F, jnp.asarray(normals, float)).reshape(-1)
+    return jnp.concatenate([rows, tau - tau_max, -tau - tau_max])
+
+
+def push_check_fast(st: Statics, planted_idx, normals, adhesion, mu, tau_max, lam_min,
+                    directions=None, faces=PYRAMID_FACES, tol=1e-6):
+    """Does the stance resist a push or twist of ``lam_min`` in every direction, with the
+    internal forces the servos settle at (no LP)?
+
+    The least-torque forces (:func:`least_torque`) are linear in the load: per direction e
+    the feet carry gravity plus ``lam_min e`` with the least-torque split of that load (the
+    compliance answer, ``docs/statics.md`` section 5), and those forces and torques must
+    satisfy the limits (:func:`within_limits`; the pyramid, as the LPs). The undisturbed
+    solution must too. Sufficient for :func:`disturbance_check` (that LP may choose any
+    internal forces per direction), not necessary: a stance can fail here and pass there
+    (it then holds the push only with tuned internal forces).
+
+    Args:
+        st, planted_idx, normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        lam_min: the push to resist (N; moments as force x ``DIST_LENGTH``).
+        directions: (K, 6) push directions (default :func:`disturbance_directions`).
+        tol: slack allowed on every limit row (N, N m).
+
+    Returns:
+        A tuple ``(ok, per_direction, margin)``: scalar bool (the undisturbed solution
+        and every direction within the limits), (K,) bool, the smallest round-cone margin
+        over the directions and feet (N, :func:`cone_margin`).
+    """
+    directions = disturbance_directions() if directions is None else directions
+    L = st.J_base.shape[0]
+    idx = jnp.asarray(planted_idx)
+    planted = jnp.zeros(L, bool).at[idx].set(True)
+    A, _ = _equilibrium(st, planted)
+    A_pinv = jnp.linalg.pinv(A)
+    _, s, Vt = jnp.linalg.svd(A, full_matrices=True)
+    s = jnp.concatenate([s, jnp.zeros(Vt.shape[0] - s.shape[0])])
+    N = Vt.T * (s <= NULL_TOL * s[0])[None, :]
+    K = -jnp.einsum("inc,ick->nk", st.J_joint, N.reshape(-1, 3, N.shape[1]))
+    K_pinv = jnp.linalg.pinv(K)
+
+    def least(load):
+        """Least-torque forces (L, 3) and torques for the base load ``load`` (6,)."""
+        F0 = A_pinv @ jnp.concatenate([load, jnp.zeros(3 * L)])
+        z = -K_pinv @ _torques(st, F0.reshape(-1, 3))
+        F = (F0 + N @ z).reshape(-1, 3)
+        return F, _torques(st, F)
+
+    F, tau = least(st.bias_base)
+    ok0 = within_limits(F[idx], tau, normals, adhesion, mu, tau_max, faces, tol)
+    Fe, tau_e = jax.vmap(least)(st.bias_base + lam_min * jnp.asarray(directions, float))
+    per = jax.vmap(lambda f, t: within_limits(f[idx], t, normals, adhesion, mu, tau_max,
+                                              faces, tol))(Fe, tau_e)
+    margin = jax.vmap(lambda f: cone_margin(f[idx], normals, adhesion, mu)[0])(Fe).min()
+    return ok0 & per.all(), per, margin
+
+
+def least_torque_fast(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
+                      faces=PYRAMID_FACES, tol=1e-6):
+    """The least-torque forces without limits (:func:`least_torque`, closed form), and
+    whether they satisfy the limits anyway.
+
+    If they do, they are also the optimum of :func:`least_torque_qp` (constraints that the
+    unconstrained optimum satisfies do not change it; up to the QP's small regularization),
+    so the QP is needed only where ``within`` is False.
+
+    Returns:
+        A tuple ``(F, tau, within)``: (p, 3) the planted feet's forces (N), (nj,) torques
+        (N m), scalar bool.
+    """
+    L = st.J_base.shape[0]
+    planted = jnp.zeros(L, bool).at[jnp.asarray(planted_idx)].set(True)
+    F, tau = least_torque(st, planted)
+    F = F[jnp.asarray(planted_idx)]
+    return F, tau, within_limits(F, tau, normals, adhesion, mu, tau_max, faces, tol)
+
+
+def least_torque_qp(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
+                    faces=PYRAMID_FACES, reg=1e-6, max_iter=100):
+    """The foot forces that hold the posture with the least actuator torque, within the
+    limits: a QP.
+
+        min_F  |tau(F)|^2 + reg |F|^2,   tau(F) = bias_joint - J_P^T F
+        s.t.   equilibrium (gravity factor 1), adhesion, friction (inner pyramid),
+               |tau| <= tau_max (if not None)
+
+    Unlike :func:`least_torque` (no limits: it may pull with feet that cannot) and the
+    "most central" forces of :func:`foot_forces_lp` (many optimal distributions with four
+    feet; the solver's pick is arbitrary), the answer is unique (``reg``) and within the
+    limits. Infeasible where the posture does not hold: check ``violation``.
+
+    Args:
+        st, planted_idx, normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        reg: Tikhonov weight on the forces (uniqueness, N m^2 per N^2).
+        max_iter: qpax iterations.
+
+    Returns:
+        A tuple ``(F, tau, violation)``:
+
+        F: (p, 3) the planted feet's forces, world frame (N).
+        tau: (nj,) the actuator torques (N m).
+        violation: the solution's largest constraint violation (N or N m).
+    """
+    p = len(planted_idx)
+    # the limits and equilibrium of the LP builder, without its scalar variable
+    _, A_eq, b_eq, G, h = _lp(st, planted_idx, normals, adhesion, mu, tau_max, faces,
+                              eq_col=jnp.zeros(6), eq_rhs=st.bias_base,
+                              tau_const=st.bias_joint, tau_col=jnp.zeros_like(st.bias_joint),
+                              cap=0.0)
+    A_eq, G, h = A_eq[:, :-1], G[:-1, :-1], h[:-1]          # drop t (and its cap row)
+    M = jnp.transpose(st.J_joint[jnp.asarray(planted_idx)], (1, 0, 2)).reshape(-1, 3 * p)
+    Q = 2.0 * (M.T @ M) + 2.0 * reg * jnp.eye(3 * p)       # |c - M F|^2 = F'M'MF - 2c'MF + ..
+    q = -2.0 * (M.T @ st.bias_joint)
+    x = qpax.solve_qp(Q, q, A_eq, b_eq, G, h, max_iter=max_iter,
+                      linear_solver=qpax.LinearSolver.QR)[0]
+    violation = jnp.maximum(jnp.abs(A_eq @ x - b_eq).max(), jnp.maximum(G @ x - h, 0.0).max())
+    return x.reshape(-1, 3), st.bias_joint - M @ x, violation
+
+
+# --------------------------------------------------------------------------- #
 # Disturbance margin                                                          #
 # --------------------------------------------------------------------------- #
 DIST_LENGTH = 0.1   # a moment M counts as a force M / DIST_LENGTH (m)
@@ -481,3 +735,115 @@ def disturbance_margin(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
 
     lam, viol = jax.vmap(one)(directions)
     return lam.min(), lam, viol
+
+
+def disturbance_check(st: Statics, planted_idx, normals, adhesion, mu, tau_max, lam_min,
+                      directions=None, faces=PYRAMID_FACES, max_iter=100, tol=1e-3):
+    """Does the stance resist a push or twist of ``lam_min`` in every direction?
+
+    Per direction e, :func:`disturbance_lp` capped at ``lam_min``: it passes if the
+    largest push reaches the cap (within ``tol``, relative) with a small constraint
+    violation. Unlike :func:`disturbance_margin` it only asks for ``lam_min``, not the
+    largest push. False where the posture does not hold at all.
+
+    Args:
+        st, planted_idx, normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        lam_min: the push to resist (N; moments as force x ``DIST_LENGTH``).
+        directions: (K, 6) disturbance directions (default :func:`disturbance_directions`).
+        max_iter: qpax iterations.
+        tol: relative tolerance on reaching ``lam_min``, and the violation bound (N).
+
+    Returns:
+        A tuple ``(ok, per_direction)``: scalar bool (every direction passes), (K,) bool.
+    """
+    directions = disturbance_directions() if directions is None else directions
+
+    def one(e):
+        x, viol = _solve(*disturbance_lp(st, planted_idx, normals, adhesion, mu, tau_max, e,
+                                         faces, lam_min), max_iter)
+        return (x[-1] >= lam_min * (1.0 - tol)) & (viol < tol)
+
+    per = jax.vmap(one)(directions)
+    return per.all(), per
+
+
+# --------------------------------------------------------------------------- #
+# Push score: the ball radius (docs/push-score.md)                             #
+# --------------------------------------------------------------------------- #
+def push_slacks(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
+                length=DIST_LENGTH, faces=PYRAMID_FACES, reg=1e-8):
+    """The limit slacks at rest and their sensitivity to a body push (``docs/push-score.md``).
+
+    The forces respond linearly to a push w (6,), ``F(w) = F + H S w`` (the least-torque
+    response, :func:`least_torque_kkt`; ``S = diag(I, length I)``: w's moment part is
+    moment / length, in N). Each limit row of :func:`limit_rows` then has the slack
+    ``s_i(w) = s_i - h_i . w``.
+
+    Args:
+        st, planted_idx, normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        length: lever length L (m) of the push's moment part.
+        reg: see :func:`least_torque_kkt`.
+
+    Returns:
+        A tuple ``(s, h)``: (m,) slacks at rest (N, N m), (m, 6) sensitivities h_i.
+    """
+    F, _, H, M = least_torque_kkt(st, planted_idx, reg)
+    HS = H * jnp.array([1.0, 1.0, 1.0, length, length, length])
+    F = F.reshape(-1)
+
+    def rows(w):
+        Fw = F + HS @ w
+        return limit_rows(Fw.reshape(-1, 3), st.bias_joint - M @ Fw, normals, adhesion, mu,
+                          tau_max, faces)
+
+    w0 = jnp.zeros(6)
+    return -rows(w0), jax.jacfwd(rows)(w0)
+
+
+def push_score(st: Statics, planted_idx, normals, adhesion, mu, tau_max,
+               length=DIST_LENGTH, faces=PYRAMID_FACES, beta=None, h_tol=1e-9):
+    """How large a push the stance withstands in every direction: the ball radius
+    ``r* = min_i s_i / |h_i|`` over the limits a push affects (``docs/push-score.md``).
+
+    No LP: one linear solve (:func:`least_torque_kkt`) and one ratio per limit row. Negative
+    when a limit already fails at rest (then not a distance, only the worst violated
+    limit, normalized).
+
+    Args:
+        st, planted_idx, normals, adhesion, mu, tau_max, faces: see :func:`hold_lp`.
+        length: lever length L (m) of the push's moment part.
+        beta: None for the hard minimum; otherwise the sharpness of a soft minimum
+            ``-log(sum exp(-beta r_i)) / beta`` (smooth, <= r*).
+        h_tol: rows with ``|h_i|`` below this ignore the push (e.g. a lifted leg's servos).
+
+    Returns:
+        A tuple ``(r, i_star, holds)``: the score (N; moments as moment / length), the
+        index of the limit row that breaks first, scalar bool: every slack >= 0 at rest
+        (including the rows the push does not affect).
+    """
+    s, h = push_slacks(st, planted_idx, normals, adhesion, mu, tau_max, length, faces)
+    hn = jnp.linalg.norm(h, axis=-1)
+    affected = hn > h_tol
+    ratio = jnp.where(affected, s / jnp.where(affected, hn, 1.0), jnp.inf)
+    i_star = jnp.argmin(ratio)
+    if beta is None:
+        r = ratio[i_star]
+    else:
+        r = -jax.nn.logsumexp(-beta * jnp.where(affected, ratio, 1e6)) / beta
+    return r, i_star, jnp.all(s >= 0.0)
+
+
+def push_lambda(s, h, directions):
+    """Largest push ``lam`` along each direction e (unit, in w's units) that the stance
+    withstands: ``min_{i: h_i . e > 0} s_i / (h_i . e)`` (inf if no row limits it).
+
+    Args:
+        s, h: from :func:`push_slacks`.
+        directions: (K, 6) unit push directions.
+
+    Returns:
+        (K,) push sizes (N).
+    """
+    he = h @ jnp.asarray(directions).T                               # (m, K)
+    pos = he > 0.0
+    return jnp.min(jnp.where(pos, s[:, None] / jnp.where(pos, he, 1.0), jnp.inf), axis=0)

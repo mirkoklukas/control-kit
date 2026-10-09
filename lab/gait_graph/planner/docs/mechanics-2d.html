@@ -1,0 +1,156 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Wall statics 2D</title>
+<style>
+:root{--text-primary:#1f1e1d;--text-secondary:#5f5e5a;--text-muted:#888780;--text-danger:#a32d2d;
+ --surface-1:#f5f4ef;--surface-2:#ffffff;--page:#fbfaf7;--border:rgba(0,0,0,.12);--border-strong:rgba(0,0,0,.25);
+ --bg-accent:#e6f1fb;--font-mono:ui-monospace,SFMono-Regular,Menlo,monospace}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){--text-primary:#ecebe6;--text-secondary:#b4b2a9;--text-muted:#888780;--text-danger:#f09595;
+ --surface-1:#2a2a28;--surface-2:#333331;--page:#1f1f1e;--border:rgba(255,255,255,.14);--border-strong:rgba(255,255,255,.3);--bg-accent:#0c447c}}
+:root[data-theme="dark"]{--text-primary:#ecebe6;--text-secondary:#b4b2a9;--text-muted:#888780;--text-danger:#f09595;
+ --surface-1:#2a2a28;--surface-2:#333331;--page:#1f1f1e;--border:rgba(255,255,255,.14);--border-strong:rgba(255,255,255,.3);--bg-accent:#0c447c}
+*{box-sizing:border-box}
+body{margin:0;background:var(--page);color:var(--text-primary);font-family:system-ui,-apple-system,sans-serif;font-size:14px}
+main{max-width:720px;margin:0 auto;padding:16px}
+button{font:inherit;font-size:13px;color:var(--text-primary);background:transparent;border:0.5px solid var(--border-strong);border-radius:8px;padding:6px 12px;cursor:pointer}
+button:hover{background:var(--surface-1)}
+input[type=range]{accent-color:#378ADD}
+.row{display:flex;align-items:center;gap:10px;margin:2px 0;font-size:13px}
+.row label{width:84px;color:var(--text-secondary)}
+.row input{flex:1;min-width:0}
+.row span{width:52px;text-align:right;font-family:var(--font-mono);font-size:12px}
+.kv{font-family:var(--font-mono);font-size:12px;display:grid;grid-template-columns:auto 1fr;gap:2px 10px}
+.kv div:nth-child(odd){color:var(--text-secondary)}
+.bar{display:grid;grid-template-columns:56px 1fr 60px;align-items:center;gap:6px;font-size:12px;margin:3px 0}
+.track{position:relative;height:12px;background:var(--surface-1);border-radius:3px;overflow:hidden}
+.fill{position:absolute;top:0;height:12px;border-radius:3px}
+.cap{font-size:13px;color:var(--text-secondary);margin:6px 0 4px}
+.plot{width:100%;max-width:320px;height:auto}
+</style>
+</head>
+<body>
+<main>
+<svg id="sv" viewBox="0 0 680 560" style="width:100%;height:auto;display:block;touch-action:none"></svg>
+<div style="display:flex;align-items:center;gap:8px;margin:12px 0 6px;flex-wrap:wrap">
+<button id="tog"><span id="tog_t">Hide config</span></button>
+<button id="best">Set s to least torque</button><button id="zero">s = 0</button>
+</div>
+<div id="cfg" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:0 24px;padding:8px 0;border-top:0.5px solid var(--border);border-bottom:0.5px solid var(--border)">
+<div class="row"><label>s (N)</label><input type="range" id="s" min="-40" max="40" step="0.5" value="0"><span id="s_o"></span></div>
+<div class="row"><label>h (m)</label><input type="range" id="h" min="0.035" max="0.50" step="0.005" value="0.10"><span id="h_o"></span></div>
+<div class="row"><label>y_f (m)</label><input type="range" id="yf" min="0.02" max="0.40" step="0.005" value="0.20"><span id="yf_o"></span></div>
+<div class="row"><label>y_b (m)</label><input type="range" id="yb" min="-0.40" max="-0.02" step="0.005" value="-0.20"><span id="yb_o"></span></div>
+<div class="row"><label>ℓ1 (m)</label><input type="range" id="l1" min="0.05" max="0.30" step="0.005" value="0.15"><span id="l1_o"></span></div>
+<div class="row"><label>ℓ2 (m)</label><input type="range" id="l2" min="0.05" max="0.30" step="0.005" value="0.20"><span id="l2_o"></span></div>
+<div class="row"><label>force lim (N)</label><input type="range" id="fl" min="5" max="200" step="5" value="50"><span id="fl_o"></span></div>
+<div class="row"><label>torque lim</label><input type="range" id="tl" min="1" max="50" step="1" value="10"><span id="tl_o"></span></div>
+</div>
+<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:12px 24px;margin-top:10px">
+<div><div class="cap">Joint torques (N m)</div><div id="bars"></div></div>
+<div><div class="cap">Foot forces (N), wall on foot</div><div class="kv" id="kv"></div><div id="warn" style="font-size:13px;color:var(--text-danger);margin-top:8px"></div></div>
+</div>
+<div style="display:flex;gap:16px;flex-wrap:wrap;padding:1rem 0 0.5rem">
+<div style="flex:1;min-width:280px"><div class="cap">Foot force (N, T) in N</div><svg id="p1" class="plot" viewBox="0 0 320 280"></svg></div>
+<div style="flex:1;min-width:280px"><div class="cap">Leg torque (τ_hip, τ_knee) in N m</div><svg id="p2" class="plot" viewBox="0 0 320 280"></svg></div>
+</div>
+<div style="display:flex;gap:16px;flex-wrap:wrap;font-size:12px;color:var(--text-secondary)">
+<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#378ADD;vertical-align:-1px"></span> front</span>
+<span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#D4537E;vertical-align:-1px"></span> back</span>
+<span>hollow: outside the limits (clamped to the edge)</span>
+</div>
+<p style="font-size:12px;color:var(--text-muted);margin-top:16px">Body a = 0.14 m, b = 0.06 m, M = 2.8 kg; feet pinned to the wall; massless legs, frozen joints. See mechanics-2d.md, sections 3 and 4.</p>
+</main>
+<script>
+const A=0.14,B=0.06,M=2.8,G0=9.81,W=M*G0,SMAX=40;
+const VW=680,VH=560,SC=680,X0=-0.12,Y1=VH/SC/2,FS=2.4;
+const sv=document.getElementById('sv'),$=id=>document.getElementById(id);
+const px=x=>(x-X0)*SC,py=y=>(Y1-y)*SC;
+const PUSH='#1D9E75',PULL='#D85A30',RES='#378ADD',GR='#888780',CF='#378ADD',CB='#D4537E';
+const IDS=['s','h','yf','yb','l1','l2','fl','tl'];
+function ik(m,p,L1,L2){const dx=p[0]-m[0],dy=p[1]-m[1],d=Math.hypot(dx,dy);
+ if(d>L1+L2-1e-9||d<Math.abs(L1-L2)+1e-9)return null;
+ const al=Math.atan2(dy,dx),be=Math.acos((L1*L1+d*d-L2*L2)/(2*L1*d));
+ const k1=[m[0]+L1*Math.cos(al+be),m[1]+L1*Math.sin(al+be)],k2=[m[0]+L1*Math.cos(al-be),m[1]+L1*Math.sin(al-be)];
+ return k1[0]>k2[0]?k1:k2;}
+function tau(r,yj,N,T){return r[0]*T+(yj-r[1])*N;}
+function model(){const s=+$('s').value,yf=+$('yf').value,yb=+$('yb').value,h=+$('h').value,L1=+$('l1').value,L2=+$('l2').value;
+ const D=yf-yb,Nf=-W*h/D,Nb=W*h/D,Tf=W/2+s,Tb=W/2-s;
+ const mf=[h,A/2],mb=[h,-A/2],kf=ik(mf,[0,yf],L1,L2),kb=ik(mb,[0,yb],L1,L2);
+ const t=[],legs={};
+ if(kf){const a=tau(mf,yf,Nf,Tf),b=tau(kf,yf,Nf,Tf);t.push(['hip f',a,h],['knee f',b,kf[0]]);legs.f=[a,b];}
+ if(kb){const a=tau(mb,yb,Nb,Tb),b=tau(kb,yb,Nb,Tb);t.push(['hip b',a,-h],['knee b',b,-kb[0]]);legs.b=[a,b];}
+ return {s,yf,yb,h,D,Nf,Nb,Tf,Tb,mf,mb,kf,kb,t,legs};}
+function mk(par,tag,at,txt){const e=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const k in at)e.setAttribute(k,at[k]);if(txt!==undefined)e.textContent=txt;par.appendChild(e);return e;}
+const el=(t,a,x)=>mk(sv,t,a,x);
+function arrow(x,y,fx,fy,col,w,dash){const x2=px(x)+fx*FS,y2=py(y)-fy*FS,L=Math.hypot(fx,fy)*FS;if(L<1)return;
+ el('line',{x1:px(x),y1:py(y),x2,y2,stroke:col,'stroke-width':w,'stroke-dasharray':dash||'','pointer-events':'none'});
+ const ux=(x2-px(x))/L,uy=(y2-py(y))/L,hs=8;
+ el('polygon',{points:`${x2},${y2} ${x2-hs*ux-hs*0.5*uy},${y2-hs*uy+hs*0.5*ux} ${x2-hs*ux+hs*0.5*uy},${y2-hs*uy-hs*0.5*ux}`,fill:col,'pointer-events':'none'});}
+function draw(m){sv.innerHTML='';
+ el('rect',{x:0,y:0,width:px(0),height:VH,fill:'var(--surface-1)'});
+ el('line',{x1:px(0),y1:0,x2:px(0),y2:VH,stroke:'var(--text-secondary)','stroke-width':1.5});
+ el('line',{x1:px(0),y1:py(0),x2:VW,y2:py(0),stroke:'var(--border)','stroke-dasharray':'3 4'});
+ for(let i=1;i<=8;i++){const v=i/10;el('line',{x1:px(v),y1:VH-6,x2:px(v),y2:VH,stroke:'var(--border-strong)'});el('text',{x:px(v),y:VH-10,'font-size':11,'text-anchor':'middle',fill:'var(--text-muted)'},v.toFixed(1));}
+ for(const v of [-0.3,-0.2,-0.1,0.1,0.2,0.3]){el('line',{x1:px(0)-6,y1:py(v),x2:px(0),y2:py(v),stroke:'var(--border-strong)'});el('text',{x:px(0)-9,y:py(v)+4,'font-size':11,'text-anchor':'end',fill:'var(--text-muted)'},v.toFixed(1));}
+ const bd=el('rect',{x:px(m.h-B/2),y:py(A/2),width:B*SC,height:A*SC,fill:drag==='body'?'var(--bg-accent)':'var(--surface-2)',stroke:'var(--text-primary)','stroke-width':1.2,rx:2,style:'cursor:ew-resize'});bd.dataset.drag='body';
+ for(const [mm,k,yj,N,T,tg,lc] of [[m.mf,m.kf,m.yf,m.Nf,m.Tf,'f',CF],[m.mb,m.kb,m.yb,m.Nb,m.Tb,'b',CB]]){
+  if(k){el('polyline',{points:`${px(mm[0])},${py(mm[1])} ${px(k[0])},${py(k[1])} ${px(0)},${py(yj)}`,fill:'none',stroke:'var(--text-primary)','stroke-width':3.5,'stroke-linejoin':'round','pointer-events':'none'});
+   el('circle',{cx:px(k[0]),cy:py(k[1]),r:5,fill:'var(--surface-2)',stroke:'var(--text-primary)','pointer-events':'none'});}
+  else el('line',{x1:px(mm[0]),y1:py(mm[1]),x2:px(0),y2:py(yj),stroke:PULL,'stroke-width':1.5,'stroke-dasharray':'4 4','pointer-events':'none'});
+  el('circle',{cx:px(mm[0]),cy:py(mm[1]),r:5,fill:'var(--surface-2)',stroke:'var(--text-primary)','pointer-events':'none'});
+  arrow(0,yj,N,0,N>=0?PUSH:PULL,1.5,'4 3');arrow(0,yj,0,T,GR,1.5,'4 3');arrow(0,yj,N,T,RES,2.5);
+  const f=el('circle',{cx:px(0),cy:py(yj),r:8,fill:lc,stroke:'var(--surface-2)','stroke-width':2,style:'cursor:ns-resize'});f.dataset.drag=tg;}
+ arrow(m.h,0,0,-W,GR,2);
+ el('text',{x:px(m.h)+6,y:py(0)+W*FS-4,'font-size':12,fill:'var(--text-secondary)','pointer-events':'none'},'Mg');
+ const c=el('circle',{cx:px(m.h),cy:py(0),r:6,fill:'var(--text-primary)',stroke:'var(--surface-2)','stroke-width':1.5,style:'cursor:ew-resize'});c.dataset.drag='body';
+ el('text',{x:8,y:16,'font-size':12,fill:'var(--text-secondary)'},'wall');}
+function plot(svg,series,R,xl,yl){svg.innerHTML='';const Wd=320,Ht=280,ml=40,mr=10,mt=10,mb=34;
+ const X=v=>ml+(v+R)/(2*R)*(Wd-ml-mr),Y=v=>mt+(R-v)/(2*R)*(Ht-mt-mb);
+ const g=(t,a,x)=>mk(svg,t,a,x);
+ g('rect',{x:ml,y:mt,width:Wd-ml-mr,height:Ht-mt-mb,fill:'none',stroke:'var(--border)'});
+ for(const v of [-R,-R/2,0,R/2,R]){
+  g('line',{x1:X(v),y1:mt,x2:X(v),y2:Ht-mb,stroke:v===0?'var(--border-strong)':'var(--border)','stroke-width':v===0?1:0.5});
+  g('line',{x1:ml,y1:Y(v),x2:Wd-mr,y2:Y(v),stroke:v===0?'var(--border-strong)':'var(--border)','stroke-width':v===0?1:0.5});
+  g('text',{x:X(v),y:Ht-mb+14,'font-size':11,'text-anchor':'middle',fill:'var(--text-secondary)'},+v.toFixed(1));
+  g('text',{x:ml-5,y:Y(v)+4,'font-size':11,'text-anchor':'end',fill:'var(--text-secondary)'},+v.toFixed(1));}
+ g('text',{x:(ml+Wd-mr)/2,y:Ht-4,'font-size':12,'text-anchor':'middle',fill:'var(--text-secondary)'},xl);
+ g('text',{x:12,y:(mt+Ht-mb)/2,'font-size':12,'text-anchor':'middle',fill:'var(--text-secondary)',transform:`rotate(-90 12 ${(mt+Ht-mb)/2})`},yl);
+ const cl=v=>Math.max(-R,Math.min(R,v));
+ for(const s of series){const out=Math.abs(s.pt[0])>R||Math.abs(s.pt[1])>R;
+  g('circle',{cx:X(cl(s.pt[0])),cy:Y(cl(s.pt[1])),r:6,fill:out?'none':s.col,stroke:out?s.col:'var(--surface-2)','stroke-width':out?2:1.5});}}
+function render(){const m=model(),FL=+$('fl').value,TL=+$('tl').value;
+ for(const id of IDS)$(id+'_o').textContent=(+$(id).value).toFixed(id==='s'?1:(id==='fl'||id==='tl')?0:3);
+ draw(m);
+ $('bars').innerHTML=m.t.map(([n,v])=>{const w=Math.min(1,Math.abs(v)/TL)*50,l=v>=0?50:50-w;
+  return `<div class="bar"><span style="color:var(--text-secondary)">${n}</span><div class="track"><div style="position:absolute;left:50%;top:0;height:12px;border-left:0.5px solid var(--border-strong)"></div><div class="fill" style="left:${l}%;width:${w}%;background:${n.endsWith('f')?CF:CB}"></div></div><span style="font-family:var(--font-mono);text-align:right;color:${Math.abs(v)>TL?'var(--text-danger)':'inherit'}">${v>=0?'+':''}${v.toFixed(2)}</span></div>`;}).join('')+
+  `<div class="bar"><span style="color:var(--text-secondary)">Σ τ²</span><span></span><span style="font-family:var(--font-mono);text-align:right">${m.t.reduce((a,r)=>a+r[1]*r[1],0).toFixed(2)}</span></div>`;
+ const f=x=>(x>=0?'+':'')+x.toFixed(2);
+ $('kv').innerHTML=`<div>N_f</div><div>${f(m.Nf)} ${m.Nf<0?'(pull)':'(push)'}</div><div>T_f</div><div>${f(m.Tf)}</div><div>N_b</div><div>${f(m.Nb)} ${m.Nb<0?'(pull)':'(push)'}</div><div>T_b</div><div>${f(m.Tb)}</div><div>Δ</div><div>${m.D.toFixed(3)} m</div><div>Mg</div><div>${W.toFixed(2)} N</div>`;
+ plot($('p1'),[{col:CF,pt:[m.Nf,m.Tf]},{col:CB,pt:[m.Nb,m.Tb]}],FL,'N (+ push, − pull)','T (+ up)');
+ const ls=[];for(const k of ['f','b'])if(m.legs[k])ls.push({col:k==='f'?CF:CB,pt:m.legs[k]});
+ plot($('p2'),ls,TL,'τ_hip','τ_knee');
+ const L1=+$('l1').value,L2=+$('l2').value;
+ $('warn').textContent=(!m.kf||!m.kb)?`Unreachable: ${!m.kf?'front':''}${!m.kf&&!m.kb?' and ':''}${!m.kb?'back':''} foot (ℓ1 = ${L1.toFixed(3)}, ℓ2 = ${L2.toFixed(3)})`:'';}
+IDS.forEach(id=>$(id).addEventListener('input',render));
+let cfgShown=true;
+$('tog').addEventListener('click',()=>{cfgShown=!cfgShown;$('cfg').style.display=cfgShown?'grid':'none';$('tog_t').textContent=cfgShown?'Hide config':'Show config';});
+$('zero').onclick=()=>{$('s').value=0;render();};
+$('best').onclick=()=>{$('s').value=0;const m=model();if(!m.t.length)return;
+ let num=0,den=0;for(const [,v,c] of m.t){num+=v*c;den+=c*c;}
+ const s=Math.max(-SMAX,Math.min(SMAX,-num/den));$('s').value=(Math.round(s*2)/2);render();};
+function svgPt(e){const p=sv.createSVGPoint();p.x=e.clientX;p.y=e.clientY;const q=p.matrixTransform(sv.getScreenCTM().inverse());return [X0+q.x/SC,Y1-q.y/SC];}
+let drag=null,off=0;
+sv.addEventListener('pointerdown',e=>{const d=e.target.dataset&&e.target.dataset.drag;if(!d)return;drag=d;sv.setPointerCapture(e.pointerId);
+ if(d==='body')off=(+$('h').value)-svgPt(e)[0];render();});
+sv.addEventListener('pointermove',e=>{if(!drag)return;const [x,y]=svgPt(e);
+ let id,v;if(drag==='body'){id='h';v=x+off;}else{id=drag==='f'?'yf':'yb';v=y;}
+ const s_=$(id);s_.value=Math.max(+s_.min,Math.min(+s_.max,v));render();});
+const end=()=>{if(drag){drag=null;render();}};
+sv.addEventListener('pointerup',end);sv.addEventListener('pointercancel',end);
+render();
+</script>
+</body>
+</html>

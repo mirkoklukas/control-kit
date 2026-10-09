@@ -23,7 +23,8 @@ Parameters: every number is a field of :class:`.config.MjModelCfg` (``config.py`
 except the scene's gravity tilt, which is an argument of :func:`build`. The climb env
 builds with no tilt and sets ``model.opt.gravity`` per episode (:func:`gravity_dir`). None is hardcoded here. Where each one lands in the model:
 
-- Geometry: ``mount_radius``, ``leg_lengths`` (coxa/femur/tibia),
+- Geometry: ``mount_radius``, ``leg_lengths`` (coxa/femur/tibia), ``link_radii``
+  (coxa/femur/tibia capsule radii, set on the link geoms in :func:`robot_spec`),
   ``joint_limits_deg`` (also the servo ctrlrange), ``body_half_height``,
   ``link_radius`` -> passed to ``Robot.to_mjcf``.
 - Masses: ``mass_body``, ``mass_links`` -> set on the trunk/link geoms in
@@ -85,7 +86,7 @@ def _add_foot(spec: mujoco.MjSpec, cfg: MjModelCfg, i: int) -> None:
     # The tibia capsule's rounded end would stick out past the ankle pivot and hit
     # the ground / pad when the ankle flexes: end the collision capsule 2r short and
     # bridge the gap with a thin visual-only shank.
-    r, L = cfg.link_radius, cfg.leg_lengths[-1]
+    r, L = cfg.link_radii[2], cfg.leg_lengths[-1]
     tibia = spec.body(f"leg{i}_2").geoms[0]
     tibia.fromto = [0, 0, 0, L - 2 * r, 0, 0]
     spec.body(f"leg{i}_2").add_geom(
@@ -196,6 +197,7 @@ def robot_spec(cfg: MjModelCfg) -> mujoco.MjSpec:
         for k, part in enumerate(("coxa", "femur", "tibia")):
             g = spec.body(f"leg{i}_{k}").geoms[0]
             g.mass, g.rgba = cfg.mass_links[k], _RGBA[part]
+            g.size[0] = cfg.link_radii[k]          # per-link radius (coxa, femur, tibia)
         _add_foot(spec, cfg, i)
     return spec
 

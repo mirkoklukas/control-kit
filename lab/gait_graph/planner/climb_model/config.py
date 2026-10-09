@@ -16,7 +16,10 @@ class MjModelCfg:
     leg_lengths: tuple = (0.05, 0.15, 0.20)       # coxa, femur, tibia (m)
     joint_limits_deg: tuple = ((-60, 60), (-100, 100), (-160, 160))
     body_half_height: float = 0.03                # trunk box z half-extent (m)
-    link_radius: float = 0.012                    # leg capsule radius (m)
+    link_radius: float = 0.012                    # leg capsule radius (m), the femur's;
+                                                  # coxa / tibia: link_radii
+    link_radii: tuple = (0.015, 0.012, 0.009)     # coxa, femur, tibia capsule radii (m);
+                                                  # 2026-10-06: coxa thicker, tibia thinner
     nose_offset: float = 0.005                    # front marker cube (side R/3): top/front this far past the trunk (m)
 
     # --- masses (kg); total ~ body + num_legs * (coxa + femur + tibia + pad) ---
