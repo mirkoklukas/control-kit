@@ -143,13 +143,31 @@ def leg_checks(robot: Robot, scene: collision.Scene, cfg: Cfg, shoulder: SE3,
     hit = jax.vmap(lambda l: jax.vmap(lambda b: collision.overlap(l, b))(body_box))(links)
     self_ok = ~jnp.any(hit)
 
-    pts = shoulder.apply(leg.collision_cloud(theta, delta=cfg.collision_delta))
+    terrain = leg_terrain_ok(robot, scene, cfg, shoulder, theta, site, planted)
+
+    return dict(reach=reach, limits=limits, ankle=ankle, self=self_ok, terrain=terrain)
+
+
+def leg_terrain_ok(robot: Robot, scene: collision.Scene, cfg: Cfg, shoulder: SE3,
+                   theta: jax.Array, site: Foothold, planted: jax.Array) -> jax.Array:
+    """The leg clear of the terrain (scalar bool): no point of its collision cloud
+    (``collision_delta``-spaced, each with its link's radius) closer than that radius plus
+    ``terrain_margin``. If planted, points within ``foot_clearance_radius`` of the foothold
+    are ignored (the foot is *meant* to touch).
+
+    Args:
+        robot, scene, cfg: the robot, terrain, and knobs.
+        shoulder: the leg's world shoulder pose.
+        theta: (n,) joint angles.
+        site: the leg's foothold, world frame (ignored unless ``planted``).
+        planted: scalar bool.
+    """
+    planted = jnp.asarray(planted, bool)
+    pts = shoulder.apply(robot.leg.collision_cloud(theta, delta=cfg.collision_delta))
     at_foot = planted & (jnp.linalg.norm(pts - site.position, axis=-1)
                          < cfg.foot_clearance_radius)
     sd = collision.sdf(scene, pts)
-    terrain = jnp.all(at_foot | (sd >= _cloud_radii(leg, cfg) + cfg.terrain_margin))
-
-    return dict(reach=reach, limits=limits, ankle=ankle, self=self_ok, terrain=terrain)
+    return jnp.all(at_foot | (sd >= _cloud_radii(robot.leg, cfg) + cfg.terrain_margin))
 
 
 def _body_cloud(robot: Robot, cfg: Cfg, body: SE3) -> jax.Array:
@@ -169,10 +187,54 @@ def spacing_ok(cfg: Cfg, sites: Foothold, planted: jax.Array) -> jax.Array:
     return jnp.all(~pair | (d >= cfg.min_foot_separation))
 
 
-def body_terrain_ok(robot: Robot, scene, cfg: Cfg, body: SE3) -> jax.Array:
-    """The body box clear of the terrain (scalar bool). Depends on the body only."""
+def body_terrain_ok_points(robot: Robot, scene, cfg: Cfg, body: SE3) -> jax.Array:
+    """The body box clear of the terrain (scalar bool), by points: the box filled with points
+    ``collision_delta`` apart, each against the terrain's SDF (boxes and spheres). Depends on
+    the body only. ~25 us per posture at 1 cm (1792 points); replaced by the exact box-box
+    :func:`body_terrain_ok` (2026-10-10), kept for comparison (``experiments/collision_bench``)."""
     sd = collision.sdf(scene, _body_cloud(robot, cfg, body))
     return jnp.all(sd >= cfg.terrain_margin)
+
+
+def body_terrain_ok(robot: Robot, scene, cfg: Cfg, body: SE3) -> jax.Array:
+    """The body box clear of the terrain's boxes (scalar bool): an exact box-vs-box test
+    (separating axes, :func:`collision.boxes_overlap`) against each box of ``scene``, within
+    ``terrain_margin``. The mounts' box with half height ``body_half_height``; one test per
+    terrain box (~0.1-0.2 us per posture for 1-10 boxes, 2026-10-10; it agreed with MuJoCo's
+    collision on every posture, the point version :func:`body_terrain_ok_points` missed
+    0.5% with 10 boxes). Ignores the scene's spheres (the planner's terrain is boxes).
+    Depends on the body only.
+    """
+    center, half = robot.mount_box(half_height=cfg.body_half_height)
+    c = body.apply(center)
+    R = body.rotation().as_matrix()
+    hit = jax.vmap(lambda bc, bh: collision.boxes_overlap(c, half, R, bc, bh, jnp.eye(3),
+                                                         margin=cfg.terrain_margin))(
+        scene.box_center, scene.box_half)
+    return ~jnp.any(hit)
+
+
+def terrain_checks(robot: Robot, scene, cfg: Cfg, posture: Posture, sites: Foothold,
+                   planted: jax.Array):
+    """Collision with the terrain for a whole posture: every leg (:func:`leg_terrain_ok`) and
+    the body (:func:`body_terrain_ok`, exact box-vs-box). No self-collision, no other checks: meant as a cheap
+    filter after sampling, before scoring.
+
+    Args:
+        robot, scene, cfg: the robot, terrain, and knobs.
+        posture: body pose and (L, n) joint angles.
+        sites: (L,) footholds (world; only the planted ones are used).
+        planted: (L,) bool.
+
+    Returns:
+        A tuple ``(ok, legs, body)``: scalar bool (all clear), (L,) bool per leg, scalar bool.
+    """
+    sh = robot.shoulders(posture.body)
+    legs = jax.vmap(lambda i, site, p: leg_terrain_ok(robot, scene, cfg, sh[i], posture.thetas[i],
+                                                      site, p))(
+        jnp.arange(posture.thetas.shape[0]), sites, planted)
+    body = body_terrain_ok(robot, scene, cfg, posture.body)
+    return jnp.all(legs) & body, legs, body
 
 
 def body_checks(robot: Robot, scene, cfg: Cfg, body: SE3, sites: Foothold,

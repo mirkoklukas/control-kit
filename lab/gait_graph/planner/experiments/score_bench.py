@@ -11,6 +11,8 @@ batch size n:
 - ``body + leg``: n body poses in the region, each with a foothold + angles for leg ``leg``
   (:func:`joint_sampler`, ``tries`` per leg).
 - ``body + posture``: the same for all four legs.
+- ``terrain checks``: :func:`..stance.terrain_checks` on those postures (every leg and the
+  body clear of the terrain): a filter between sampling and scoring.
 - ``push score``: :func:`..statics.push_score` on the n postures of ``body + posture``
   (MuJoCo statics, least torque, all limits).
 - ``push min-norm``: :func:`..statics.push_score_min_norm` (kinematic centre of mass,
@@ -36,16 +38,18 @@ import numpy as np
 
 from runkit import Experiment, RunContext
 
-from controlkit.kinematics.types import Posture
+from controlkit.kinematics.types import Foothold, Posture
 from controlkit.se3 import SE3
 
 from ... import terrain
 from ....kinematics.reach_sdf import Keepout, branches_fn, make_reach_grid
 from ....kinematics.sampling import fixed_body_sampler, joint_sampler
+from ..climb_cfg import climb_cfg
 from ..climb_model.config import MjModelCfg
 from ..climb_model.mjmodel import make_robot
 from ..climb_statics import ClimbModel
 from ..scoring import G
+from ..stance import terrain_checks
 from ..statics import hold_min_norm, kinematic_com, push_score, push_score_min_norm
 
 
@@ -145,11 +149,17 @@ def run(cfg: ScoreBenchCfg, ctx: RunContext) -> dict:
         feet, com = feet_com(b, th)
         return hold_min_norm(com, feet, fh.normal[f], cm.mass, G, cfg.adhesion, cfg.mu)[0]
 
+    ccfg = climb_cfg(mj)
+
+    def one_terrain(b, th, f):
+        return terrain_checks(robot, scene, ccfg, Posture(b, th), Foothold(fh.position[f], fh.normal[f]),
+                              jnp.ones(L, bool))[0]
+
     def chunked(one):
         return jax.jit(lambda b, th, f: jax.lax.map(lambda x: one(*x), (b, th, f),
                                                     batch_size=cfg.score_chunk))
 
-    scorers = {"push score": chunked(one_push), "push min-norm": chunked(one_mn_push),
+    scorers = {"terrain checks": chunked(one_terrain), "push score": chunked(one_push), "push min-norm": chunked(one_mn_push),
                "hold min-norm": chunked(one_mn_hold)}
 
     # --- per batch size
